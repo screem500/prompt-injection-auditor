@@ -107,7 +107,12 @@ This skill is for **defensive auditing and authorized testing only**. Live injec
 
 Issues and PRs welcome — especially new attack patterns, defense techniques, and scanner rules.
 
-## License
+Author
+Mijlad bin Mishari Al-Subaie — Cybersecurity Expert, Ethical Hacker (CEH), Digital Forensics Investigator (CHFI), and author of programming encyclopedias (C++, Java, Databases).
+•  X (Twitter): @Al7lhh223 https://x.com/Al7lhh223
+•  GitHub: @screem500 https://github.com/screem500
+
+## License 
 
 [Apache License 2.0](LICENSE) — Copyright 2026. Use it freely, attribution required.
 
