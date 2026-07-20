@@ -72,8 +72,11 @@ Severity guide:
 
 ### scripts/
 - `pi_scan.py` — Static analyzer for system prompts and instruction files. No dependencies; Python 3.8+. Outputs findings with line numbers, risk score, and optional JSON/Markdown reports.
+- `pi_shield.py` — Layered prompt-injection *defense* (v2.0): normalization, safe delimiting with closing-tag neutralization, scored detection, encoded-payload inspection, canary output check. Use when the user wants to add input protection to an agent, not just audit it. Prove with `test_shield.py` (11 cases).
+- `test_shield.py` — Test suite proving pi_shield against evasion techniques (homoglyphs, zero-width, base64, delimiter escape). Run after any shield change.
 
 ### references/
 - `attack-patterns.md` — Catalog of prompt-injection techniques (direct, indirect, encoding, exfiltration, multi-agent) with real-world examples. Read during Step 3.
 - `defense-checklist.md` — Actionable hardening measures; each item maps to a finding class. Read during Step 5.
+- `defense-architecture.md` — The 5-layer defense design behind pi_shield, usage patterns, and honest limits of prompt-level filtering. Read when implementing input protection.
 - `test-payloads.md` — Organized payload suite for authorized live testing, ordered by escalation. Read during Step 4.
