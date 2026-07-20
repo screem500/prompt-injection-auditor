@@ -10,9 +10,34 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
+
+# ---------------------------------------------------------------------------
+# Terminal colors (ANSI). Disabled automatically when piping output or when
+# NO_COLOR is set; force-enable with FORCE_COLOR=1.
+# ---------------------------------------------------------------------------
+
+def _supports_color():
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return sys.stdout.isatty()
+
+_COLOR = _supports_color()
+
+RED_BOLD, RED, YELLOW, CYAN, GREEN, GRAY, BOLD = "91;1", "91", "93", "96", "92", "90", "1"
+
+
+def paint(text, code):
+    """Wrap text in an ANSI color when colors are enabled."""
+    return f"\033[{code}m{text}\033[0m" if _COLOR else text
+
+
+SEVERITY_COLOR = {"Critical": RED_BOLD, "High": RED, "Medium": YELLOW, "Low": CYAN}
 
 # ---------------------------------------------------------------------------
 # Check definitions.
@@ -229,20 +254,27 @@ def verdict(score):
 
 def print_report(path, findings, score):
     bar = "#" * (score // 5) + "-" * (20 - score // 5)
-    print(f"\n=== Prompt Injection Audit: {path} ===")
-    print(f"Risk score: {score}/100 [{bar}]  {verdict(score)}\n")
+    score_color = RED_BOLD if score >= 70 else (RED if score >= 40 else (YELLOW if score >= 15 else GREEN))
+    print(f"\n{ paint('=== Prompt Injection Audit:', CYAN) } {paint(path, BOLD)} { paint('===', CYAN) }")
+    print(f"Risk score: {paint(f'{score}/100', score_color)} [{paint(bar, score_color)}]  {paint(verdict(score), score_color)}\n")
     if not findings:
-        print("No findings. Note: static analysis cannot prove safety — run live tests for confirmation.")
+        print(paint("No findings. Note: static analysis cannot prove safety — run live tests for confirmation.", GREEN))
         return
     for f in sorted(findings, key=lambda x: SEVERITY_ORDER[x["severity"]]):
+        sev = f["severity"]
+        sev_color = SEVERITY_COLOR.get(sev, BOLD)
         loc = f" (lines {', '.join(map(str, f['lines']))})" if f["lines"] else ""
-        print(f"[{f['severity']:>8}] {f['id']}: {f['title']}{loc}")
-        print(f"           Why: {f['detail']}")
-        print(f"           Fix: {f['fix']}\n")
+        print(f"{paint('[' + f'{sev:>8}' + ']', sev_color)} {paint(f['id'], BOLD)}: {f['title']}{paint(loc, GRAY)}")
+        print(f"           {paint('Why:', GRAY)} {f['detail']}")
+        print(f"           {paint('Fix:', GREEN)} {f['fix']}\n")
     counts = {}
     for f in findings:
         counts[f["severity"]] = counts.get(f["severity"], 0) + 1
-    print("Summary: " + ", ".join(f"{k}={counts[k]}" for k in ("Critical", "High", "Medium", "Low") if k in counts))
+    summary = ", ".join(
+        paint(f"{k}={counts[k]}", SEVERITY_COLOR.get(k, BOLD))
+        for k in ("Critical", "High", "Medium", "Low") if k in counts
+    )
+    print(f"{paint('Summary:', BOLD)} {summary}")
 
 
 def to_json(path, findings, score):
