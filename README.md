@@ -9,6 +9,8 @@ Static scanner + attack catalog + defense checklist + authorized red-team payloa
 
 Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open [Agent Skills](https://agentskills.io) standard.
 
+Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open Agent Skills https://agentskills.io standard.
+[](demo-prompt-injection-auditor.gif
 ## Why?
 
 Research evaluations in 2025 found that **over 90% of production LLM agents are susceptible to prompt injection**, and real incidents keep proving it:
