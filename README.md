@@ -7,9 +7,10 @@
 **An open Agent Skill that turns any AI agent into a prompt-injection security auditor.**
 Static scanner + attack catalog + defense checklist + authorized red-team payloads — built against real-world incidents like EchoLeak (CVE-2025-32711).
 
-Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open Agent Skills https://agentskills.io standard.
+Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open [Agent Skills](https://agentskills.io) standard.
 
 ![live demo](demo-prompt-injection-auditor.gif)
+
 ## Why?
 
 Research evaluations in 2025 found that **over 90% of production LLM agents are susceptible to prompt injection**, and real incidents keep proving it:
@@ -77,12 +78,19 @@ A hardened prompt (hierarchy + non-disclosure + delimiters) scores **0/100 — H
 prompt-injection-auditor/
 ├── SKILL.md                        # 5-step audit methodology + ethics guardrails
 ├── scripts/
-│   └── pi_scan.py                  # Zero-dependency static analyzer (~20 weakness classes)
+│   ├── pi_scan.py                  # Zero-dependency static analyzer (~20 weakness classes)
+│   ├── pi_shield.py                # v2.0: layered input defense (5 layers, scored decisions)
+│   └── test_shield.py              # 11-case suite proving the shield against evasion
 └── references/
     ├── attack-patterns.md          # Direct / indirect / encoding / exfiltration / multi-agent
     ├── defense-checklist.md        # 22 numbered hardening measures
+    ├── defense-architecture.md     # The 5-layer shield design + honest limits
     └── test-payloads.md            # Escalation-ordered payloads for authorized live tests
 ```
+
+### New in v2.0 — pi_shield (defense layer)
+
+The auditor finds weaknesses; **pi_shield blocks them**. A five-layer input-defense middleware: unicode/homoglyph normalization, safe delimiting with closing-tag neutralization, weighted threat scoring (ALLOW/WARN/BLOCK), base64/hex payload inspection, and canary leak detection. Defeats the evasion techniques that break naive filters — closing-tag escapes, zero-width characters, Cyrillic homoglyphs, encoded commands — proven by an 11-case test suite (`python scripts/test_shield.py`).
 
 ### Severity model
 
@@ -108,14 +116,16 @@ This skill is for **defensive auditing and authorized testing only**. Live injec
 
 Issues and PRs welcome — especially new attack patterns, defense techniques, and scanner rules.
 
-Author
-Mijlad bin Mishari Al-Subaie — Cybersecurity Expert, Ethical Hacker (CEH), Digital Forensics Investigator (CHFI), and author of programming encyclopedias (C++, Java, Databases).
-•  X (Twitter): @Al7lhh223 https://x.com/Al7lhh223
-•  GitHub: @screem500 https://github.com/screem500
+## Author
 
-## License 
+**Mujallad bin Mishari Al-Subaie** — Cybersecurity Expert, Ethical Hacker (CEH), Digital Forensics Investigator (CHFI), and author of programming encyclopedias (C++, Java, Databases).
 
-[Apache License 2.0](LICENSE) — Copyright 2026. Use it freely, attribution required.
+- X (Twitter): [@Al7lhh223](https://x.com/Al7lhh223)
+- GitHub: [@screem500](https://github.com/screem500)
+
+## License
+
+[Apache License 2.0](LICENSE) — Copyright 2026 Mujallad bin Mishari Al-Subaie. Use it freely, attribution required.
 
 ---
 
