@@ -7,10 +7,9 @@
 **An open Agent Skill that turns any AI agent into a prompt-injection security auditor.**
 Static scanner + attack catalog + defense checklist + authorized red-team payloads — built against real-world incidents like EchoLeak (CVE-2025-32711).
 
-Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open [Agent Skills](https://agentskills.io) standard.
-
 Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open Agent Skills https://agentskills.io standard.
-[](demo-prompt-injection-auditor.gif
+
+![live demo](demo-prompt-injection-auditor.gif)
 ## Why?
 
 Research evaluations in 2025 found that **over 90% of production LLM agents are susceptible to prompt injection**, and real incidents keep proving it:
