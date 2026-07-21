@@ -116,6 +116,12 @@ This skill is for **defensive auditing and authorized testing only**. Live injec
 
 Issues and PRs welcome — especially new attack patterns, defense techniques, and scanner rules.
 
+## Contributors
+
+Thanks to everyone who contributes to this project:
+
+- [@3siri](https://github.com/3siri) - Arabic prompt-injection support (normalization, language rules, tests) - first external contributor 🏅
+
 ## Author
 
 **Mujallad bin Mishari Al-Subaie** — Cybersecurity Expert, Ethical Hacker (CEH), Digital Forensics Investigator (CHFI), and author of programming encyclopedias (C++, Java, Databases).
