@@ -15,7 +15,7 @@ import re
 import sys
 from datetime import datetime, timezone
 
-try:  # Package import during tests.
+if __package__:  # Imported as scripts.pi_scan during tests or library use.
     from .language_rules import (
         ARABIC_DEFENSIVE_CONTEXT_PATTERNS,
         ARABIC_HIERARCHY_PATTERNS,
@@ -29,7 +29,7 @@ try:  # Package import during tests.
         ARABIC_UNTRUSTED_CONTENT_PATTERNS,
     )
     from .normalization import normalize_arabic, suspicious_unicode_lines
-except ImportError:  # Direct execution: python scripts/pi_scan.py ...
+else:  # Direct execution: python scripts/pi_scan.py ...
     from language_rules import (  # type: ignore
         ARABIC_DEFENSIVE_CONTEXT_PATTERNS,
         ARABIC_HIERARCHY_PATTERNS,
