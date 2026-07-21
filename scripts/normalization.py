@@ -26,7 +26,7 @@ _ARABIC_DIACRITICS_RE = re.compile(
 # sequences of at least three isolated Arabic letters are compacted; ordinary
 # multi-letter Arabic words and whitespace remain unchanged.
 _SPACED_ARABIC_LETTERS_RE = re.compile(
-    r"(?<![\u0600-\u06FF])(?:[\u0621-\u064A]\s+){2,}[\u0621-\u064A](?![\u0600-\u06FF])"
+    r"(?<![\u0600-\u06FF])(?:[\u0621-\u064A][ \t\u00A0]+){2,}[\u0621-\u064A](?![\u0600-\u06FF])"
 )
 
 # Explicitly documented invisible controls plus non-format marks that can split
@@ -90,7 +90,7 @@ def _is_suspicious_invisible(char: str) -> bool:
 
 
 def _join_spaced_arabic_letters(match: re.Match) -> str:
-    return re.sub(r"\s+", "", match.group(0))
+    return re.sub(r"[ \t\u00A0]+", "", match.group(0))
 
 
 def normalize_arabic(text: str) -> str:
