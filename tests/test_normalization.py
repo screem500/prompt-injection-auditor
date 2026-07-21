@@ -24,6 +24,11 @@ class ArabicNormalizationTests(unittest.TestCase):
     def test_does_not_join_normal_arabic_words(self):
         self.assertEqual(normalize_arabic("هذه تعليمات النظام"), "هذه تعليمات النظام")
 
+    def test_never_joins_letters_across_line_breaks(self):
+        value = "ت \nج \nا"
+        self.assertEqual(normalize_arabic(value), value)
+        self.assertEqual(len(normalize_arabic(value).splitlines()), 3)
+
     def test_preserves_line_count(self):
         original = "أول\nثَانٍ\nثالث"
         self.assertEqual(len(normalize_arabic(original).splitlines()), 3)
