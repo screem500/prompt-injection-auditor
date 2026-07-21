@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Static prompt-injection weakness scanner.
+"""pi_scan.py — Static prompt-injection weakness scanner for system prompts
+and agent instruction files (SKILL.md, AGENTS.md, CLAUDE.md, .cursorrules).
 
-Supports system prompts and agent instruction files such as SKILL.md,
-AGENTS.md, CLAUDE.md, and .cursorrules. Dependency-free; Python 3.8+.
+No third-party dependencies. Python 3.8+.
+
+Usage:
+    python pi_scan.py <target-file> [--json report.json] [--md report.md]
 """
 
 import argparse
@@ -130,14 +133,24 @@ INGEST_KEYWORDS = [
 
 
 def find_lines(text, pattern, skip_context_patterns=None):
-    """Return 1-based matching lines, optionally excluding safe contexts."""
+    """Return 1-based matching lines, optionally excluding local safe contexts.
+
+    Suppression is evaluated around each candidate match rather than across the
+    entire line. This prevents an unrelated defensive phrase elsewhere on a long
+    line from hiding a real injection pattern.
+    """
 
     rx = re.compile(pattern)
     skip_patterns = [re.compile(item) for item in (skip_context_patterns or [])]
     lines = []
     for index, line in enumerate(text.splitlines(), start=1):
-        if rx.search(line) and not any(skip.search(line) for skip in skip_patterns):
-            lines.append(index)
+        for match in rx.finditer(line):
+            start = max(0, match.start() - 140)
+            end = min(len(line), match.end() + 60)
+            context = line[start:end]
+            if not any(skip.search(context) for skip in skip_patterns):
+                lines.append(index)
+                break
     return lines
 
 
