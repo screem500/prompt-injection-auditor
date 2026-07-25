@@ -371,7 +371,7 @@ def scan(text):
                     "Agent installs or fetches packages/repos with no name pinning stated"
                 ),
                 "lines": fetch_lines,
-                "detail": "Attackers pre-register the fake package/repo names models reliably invent ('slopsquatting'), seed them with malicious code plus hidden injection, and wait for the agent to fetch the attacker copy. Repo-borne configs show the same trust failure in the wild (Codex CLI, CVE-2025-61260; Amazon Q, CVE-2026-12957).",
+                "detail": "Attackers pre-register the fake package/repo names models reliably invent ('slopsquatting' — USENIX Security 2025, Spracklen et al.: 19.7% of model-recommended packages don't exist, 43% of fakes repeat every run), seed them with malicious code plus hidden injection, and wait for the agent to fetch the attacker copy.",
                 "fix": "Never install a model-produced identifier. Pin names and verify against a lockfile or known-good index before any install. (Checklist #10, #17)",
             })
 
