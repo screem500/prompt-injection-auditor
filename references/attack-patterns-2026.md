@@ -51,7 +51,7 @@ Defenses: memory content is data, never instructions; provenance on every write;
 
 Models hallucinate package names **predictably** — the same plausible-but-wrong names recur across users and sessions. Attackers pre-register those names on npm/PyPI, seed them with malicious code (plus hidden injection payloads for the next agent that reads them), and wait for a coding agent to `pip install` the attacker copy on its own authority.
 
-This family is documented as a research class ("slopsquatting", package-hallucination attacks) rather than a single CVE; the same trust failure — executing what a model names without verification — appears in the repo-borne config incidents above (Codex CLI CVE-2025-61260, Amazon Q CVE-2026-12957).
+This family is anchored in research rather than a single CVE: **"We Have a Package for You!" (Spracklen et al., USENIX Security 2025 — Distinguished Paper)** measured 576,000 code samples from 16 models: 19.7% of recommended packages don't exist, 205,474 unique fake names, and 43% of fakes repeat on every identical run — so attackers don't guess, they harvest. The term "slopsquatting" was coined by PSF's Seth Larson (April 2025); researcher Bar Lanyado demonstrated viability by registering the hallucinated `huggingface-cli` name, which drew 30,000 downloads in three months. (Note: the repo-borne *config execution* incidents — Codex CLI CVE-2025-61260, Claude Code CVE-2025-59536, Cursor CVE-2025-54136, Amazon Q CVE-2026-12957 — are a related but distinct pattern, covered in section 1; they are candidates for a dedicated future rule.)
 
 Scanner logic: execution capability + install/fetch behavior with no name pinning → Medium; the prompt explicitly has the model pick the package name ("install the right package") → High.
 
