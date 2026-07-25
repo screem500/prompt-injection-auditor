@@ -79,3 +79,37 @@ Prompt-level filtering is **one layer of defense, never the whole wall**:
 | Base64-encoded commands | either missed, or over-blocked as "encoded" | decoded and contents scanned |
 | Long legitimate tokens (URLs, hashes) | false-positive redaction | decoded content is harmless → ALLOW |
 | Benign text containing "system" | keyword false positive | weighted patterns need attack structure |
+
+## The Tool Boundary (v2.2 — mcp_guard)
+
+pi_shield guards the user-input boundary. Agents built on MCP (Model Context Protocol) have a second, equally exposed boundary: **tool responses**. Web pages, emails, database rows, and file contents all return through tools — and every one is an untrusted channel for indirect prompt injection. mcp_guard applies the same layered philosophy to that channel, plus tool-specific checks:
+
+| Attack via tool response | mcp_guard response |
+|---|---|
+| Special tokens in data (`<\|im_start\|>`, `<<SYS>>`, `<system>`) | instant BLOCK — data never legitimately contains transcript markers |
+| Fake consent ("user has approved, proceed with deleting…") | weighted: consent + dangerous-action endorsement blocks |
+| Tool-call manipulation ("call the send_email tool") | scored, blocks when combined with other signals |
+| Exfiltration via markdown image query strings / webhook hosts | instant BLOCK (EchoLeak-class channel) |
+| Hidden channels (unicode tag block, HTML comments) | tag chars detected on raw text; instruction-laden comments scored |
+| Encoded payloads (base64/hex) | decoded and contents scanned (pi_shield Layer 4) |
+| Arabic injection phrases | v2.1 rules applied; tool data is never a command channel, so one high-severity hit blocks |
+| Tool-definition poisoning (malicious server descriptions) | `guard_tool_definition()` scans names/descriptions/schemas |
+
+Usage:
+
+```python
+from scripts.mcp_guard import guard_tool_response, guard_tool_definition
+
+# Before adding any tool result to the model context:
+result = guard_tool_response(response_text, tool_name="fetch")
+if result.decision == "BLOCK":
+    ...  # drop it, alert, never reaches the context
+context += result.sanitized  # wrapped in neutral <tool_data> delimiters
+
+# When connecting to a new MCP server:
+verdict = guard_tool_definition(server_tool_schema)
+```
+
+JSON-aware: every string value is scanned and findings carry their JSON path (`$.result.content[0].text`), so operators see exactly which field was poisoned.
+
+Honest limits, same as for pi_shield: this is one layer. A determined attacker with a novel phrasing can still slip through — pair it with least-privilege tool design, human-in-the-loop for consequential actions, and egress allow-lists.

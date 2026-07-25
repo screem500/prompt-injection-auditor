@@ -73,10 +73,13 @@ Severity guide:
 ### scripts/
 - `pi_scan.py` — Static analyzer for system prompts and instruction files. No dependencies; Python 3.8+. Outputs findings with line numbers, risk score, and optional JSON/Markdown reports.
 - `pi_shield.py` — Layered prompt-injection *defense* (v2.0): normalization, safe delimiting with closing-tag neutralization, scored detection, encoded-payload inspection, canary output check. Use when the user wants to add input protection to an agent, not just audit it. Prove with `test_shield.py` (11 cases).
+- `mcp_guard.py` — MCP tool-response guard (v2.2): scans tool responses (JSON-aware, JSON-path findings) and tool definitions for indirect injection — special tokens, fake consent, tool-call manipulation, exfiltration channels, hidden channels, encoded and Arabic payloads. Use when auditing/hardening agents that ingest tool output. Prove with `tests/test_mcp_guard.py` (18 cases).
+- `normalization.py` / `language_rules.py` — Arabic injection support (v2.1): diacritics/tatweel/letter normalization plus injection and defensive-context rules. Used by pi_scan and mcp_guard.
 - `test_shield.py` — Test suite proving pi_shield against evasion techniques (homoglyphs, zero-width, base64, delimiter escape). Run after any shield change.
 
 ### references/
 - `attack-patterns.md` — Catalog of prompt-injection techniques (direct, indirect, encoding, exfiltration, multi-agent) with real-world examples. Read during Step 3.
+- `attack-patterns-2026.md` — The 2026 agent-runtime families (MCP tool poisoning, sandbox/allowlist bypass, persistent memory injection, slopsquatting) with verified CVE anchors. Read when auditing agents with tools, sandboxes, memory, or package installs.
 - `defense-checklist.md` — Actionable hardening measures; each item maps to a finding class. Read during Step 5.
 - `defense-architecture.md` — The 5-layer defense design behind pi_shield, usage patterns, and honest limits of prompt-level filtering. Read when implementing input protection.
 - `test-payloads.md` — Organized payload suite for authorized live testing, ordered by escalation. Read during Step 4.
