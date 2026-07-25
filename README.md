@@ -23,7 +23,8 @@ In 2026 the threat moved from framework bugs into the agent runtime itself:
 
 - **MCP tool-server exposure (Flowise CVE-2026-40933, CVSS 9.9; Amazon Q CVE-2026-12957)** — a stdio MCP config is a launcher definition: registering a tool server runs arbitrary commands, and one poisoned workspace file made Amazon Q execute a malicious MCP config and leak AWS credentials.
 - **Sandbox escapes (Cursor "DuneSlide" CVE-2026-50548/50549, CVSS 9.8; MS-Agent CVE-2026-2256)** — regex denylists fall to obfuscation, and sandbox trust decisions keyed off agent-chosen paths (working directory, symlinks) fall to zero-click prompt injection.
-- **Slopsquatting & supply chain (Codex CLI CVE-2025-61260)** — attackers pre-register the package names models reliably invent; repo-borne config files execute whatever the agent loads on trust.
+- **Repo-borne config execution (Codex CLI CVE-2025-61260, CVSS 9.8; Claude Code CVE-2025-59536; Cursor CVE-2025-54136)** — agents auto-load and execute MCP/tool config files from the current repository before any trust check; one malicious repo runs code on open.
+- **Slopsquatting (USENIX Security 2025, Spracklen et al.)** — 19.7% of AI-recommended package names don't exist, and 43% of the fakes repeat on every run; attackers pre-register them and agents install them with no human checkpoint.
 
 Most system prompts ship with no instruction hierarchy, no non-disclosure rule, and no untrusted-content handling. This skill finds those weaknesses before attackers do.
 
