@@ -140,3 +140,29 @@ ARABIC_INGEST_KEYWORDS = [
     r"(?:ملف|مستند|ملفات|مستندات).{0,20}(?:مرفوعه|مرفقه|يرفعها\s+المستخدم)",
     r"(?:rag|قاعده\s+المعرفه|قاعده\s+متجهات|بحث\s+متجهي|استرجاع)",
 ]
+
+# --- 2026 agent-runtime families -------------------------------------------
+# Arabic triggers for the MCP/sandbox/memory/supply-chain rules in pi_scan.
+# Written for normalized Arabic text (diacritics/tatweel removed, ة -> ه,
+# hamzated alef -> ا). Sandbox gate/workdir terms stay English-only in
+# pi_scan: those phrases appear in English even inside Arabic prompts.
+
+ARABIC_MCP_PRESENT_PATTERNS = [
+    r"(?:\bmcp\b|بروتوكول\s+سياق\s+النموذج|خادم\s+(?:ال)?ادوات|خوادم\s+(?:ال)?ادوات)",
+]
+
+ARABIC_MCP_MUTABLE_PATTERNS = [
+    r"(?:اضف|اضافه|اضافت|سجل|تسجيل|ثبت|تثبيت|اربط|ربط|اتصل|وصل).{0,25}(?:خادم|خوادم).{0,15}(?:ال)?(?:ادوات|mcp)",
+]
+
+ARABIC_MEMORY_PATTERNS = [
+    r"(?:ذاكره\s+(?:دائمه|طويله(?:\s+الاجل|\s+المدي)?)|مخزن\s+(?:ال)?ذاكره|يتذكر\s+عبر\s+الجلسات|(?:يحفظ|حفظ)\s+.{0,15}في\s+(?:ال)?ذاكره)",
+]
+
+ARABIC_MEMORY_GUARD_PATTERNS = [
+    r"(?:سلامه\s+(?:ال)?ذاكره|مصدر\s+(?:ال)?ذاكره|مراجعه\s+قبل\s+(?:ال)?(?:كتابه|تخزين).{0,15}ذاكره|(?:ال)?ذاكره\s+(?:بيانات|معلومات).{0,20}وليست?\s+تعليمات)",
+]
+
+ARABIC_SUPPLY_CHAIN_FETCH_PATTERNS = [
+    r"(?:ثبت|تثبيت|نزل|تنزيل|اجلب|جلب|استنسخ).{0,25}(?:حزمه|الحزمه|مكتبه|المكتبه|مستودع|المستودع|تبعيه|تبعيات)",
+]

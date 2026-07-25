@@ -21,10 +21,15 @@ if __package__:  # Imported as scripts.pi_scan during tests or library use.
         ARABIC_HIERARCHY_PATTERNS,
         ARABIC_INGEST_KEYWORDS,
         ARABIC_INJECTION_PATTERNS,
+        ARABIC_MCP_MUTABLE_PATTERNS,
+        ARABIC_MCP_PRESENT_PATTERNS,
+        ARABIC_MEMORY_GUARD_PATTERNS,
+        ARABIC_MEMORY_PATTERNS,
         ARABIC_NONDISCLOSURE_PATTERNS,
         ARABIC_OUTPUT_CONSTRAINT_PATTERNS,
         ARABIC_REFUSAL_PATTERNS,
         ARABIC_ROLE_CLAIM_PATTERNS,
+        ARABIC_SUPPLY_CHAIN_FETCH_PATTERNS,
         ARABIC_TOOL_RISK_KEYWORDS,
         ARABIC_UNTRUSTED_CONTENT_PATTERNS,
     )
@@ -35,10 +40,15 @@ else:  # Direct execution: python scripts/pi_scan.py ...
         ARABIC_HIERARCHY_PATTERNS,
         ARABIC_INGEST_KEYWORDS,
         ARABIC_INJECTION_PATTERNS,
+        ARABIC_MCP_MUTABLE_PATTERNS,
+        ARABIC_MCP_PRESENT_PATTERNS,
+        ARABIC_MEMORY_GUARD_PATTERNS,
+        ARABIC_MEMORY_PATTERNS,
         ARABIC_NONDISCLOSURE_PATTERNS,
         ARABIC_OUTPUT_CONSTRAINT_PATTERNS,
         ARABIC_REFUSAL_PATTERNS,
         ARABIC_ROLE_CLAIM_PATTERNS,
+        ARABIC_SUPPLY_CHAIN_FETCH_PATTERNS,
         ARABIC_TOOL_RISK_KEYWORDS,
         ARABIC_UNTRUSTED_CONTENT_PATTERNS,
     )
@@ -130,6 +140,28 @@ INGEST_KEYWORDS = [
     r"(?i)uploaded (file|document)s?",
     r"(?i)(rag|knowledge base|vector (store|database)|retrieval)",
 ]
+
+# --- 2026 agent-runtime rule patterns ---------------------------------------
+# Covers weakness classes that became dominant after the original ~20 rule
+# families were written: MCP tool-server exposure, sandbox/allowlist bypass,
+# persistent memory injection, and supply-chain slopsquatting. Each anchors
+# to a disclosed 2026 CVE — see references/attack-patterns-2026.md.
+
+EXEC_TOOL_PATTERN = r"(?i)(\bbash\b|\bshell\b|\bterminal\b|subprocess|os\.system|code interpreter|python tool|powershell|command execution)"
+
+MCP_PRESENT_PATTERN = r"(?i)(\bmcp\b|model context protocol|tool[- ]server)"
+MCP_MUTABLE_PATTERN = r"(?i)(add|register|install|configure|connect|attach) .{0,20}(mcp|tool[- ]server|connector)"
+MCP_UNSAFE_PATTERN = r"(?i)(stdio|serializ\w*|deserializ\w*|pickle|command string|spawn|child process)"
+
+SANDBOX_GATE_PATTERN = r"(?i)(allow[- ]?list|whitelist|auto[- ]?approv\w*|pre[- ]?approved|safe commands?|trusted commands?|deny[- ]?list|blocklist|forbidden commands?|dangerous commands?)"
+SANDBOX_BYPASS_AWARE_PATTERN = r"(?i)(obfuscat\w*|normali[sz]\w*|canonicali[sz]\w*|shell built[- ]?ins?|argument injection|quote stripping)"
+SANDBOX_WORKDIR_PATTERN = r"(?i)(working directory|project root|environment variables?)"
+
+MEMORY_PATTERN = r"(?i)(long[- ]?term memory|persistent memory|memory store|remembers? across sessions|saves? to memory|memory bank)"
+MEMORY_GUARD_PATTERN = r"(?i)(memory integrity|signed memory|memory provenance|review\w*.{0,25}before.{0,25}(writing|storing).{0,20}memory|memory is data)"
+
+SUPPLY_CHAIN_FETCH_PATTERN = r"(?i)(npm install|pip install|npx |yarn add|go get|cargo add|git clone|clone the repo|download the package|fetch the package|add (a |the )?dependency)"
+SUPPLY_CHAIN_MODEL_NAMED_PATTERN = r"(?i)(the (real|official|correct) (package|library|repo|module)|whatever package (fits|is needed)|install the right (package|library))"
 
 
 def find_lines(text, pattern, skip_context_patterns=None):
@@ -244,6 +276,104 @@ def scan(text):
             "detail": "Retrieved content is an indirect-injection vector even without powerful tools.",
             "fix": "Mark retrieved content as inert data with delimiters; never treat it as instructions. (Checklist #5, #14)",
         })
+
+    # has_exec reuses tool_hits (already bilingual: English TOOL_RISK_KEYWORDS +
+    # ARABIC_TOOL_RISK_KEYWORDS) and adds a broader English-only net for coding
+    # agents that name a shell/terminal/interpreter tool without the phrase
+    # "execute code".
+    has_exec = (
+        any(label.startswith("Code/command execution capability") for label, _ in tool_hits)
+        or bool(find_lines(text, EXEC_TOOL_PATTERN))
+    )
+
+    mcp_lines = find_lines(text, MCP_PRESENT_PATTERN)
+    for pattern in ARABIC_MCP_PRESENT_PATTERNS:
+        mcp_lines.extend(find_lines(normalized_ar, pattern))
+    if mcp_lines:
+        mutable_lines = find_lines(text, MCP_MUTABLE_PATTERN)
+        for pattern in ARABIC_MCP_MUTABLE_PATTERNS:
+            mutable_lines.extend(find_lines(normalized_ar, pattern))
+        unsafe_lines = find_lines(text, MCP_UNSAFE_PATTERN)
+        if mutable_lines and (has_exec or unsafe_lines):
+            findings.append({
+                "id": "PI-MCP", "severity": "Critical",
+                "title": "Agent can add/configure MCP tool servers with no execution or serialization boundary",
+                "lines": sorted(set(mutable_lines + unsafe_lines)),
+                "detail": "Adding a tool server is equivalent to granting code execution. If injected content can reach the server-add path, that is unauthenticated RCE by proxy (Flowise Custom MCP stdio, CVE-2026-40933, CVSS 9.9; Amazon Q auto-loaded workspace MCP configs, CVE-2026-12957; Codex CLI repo-borne MCP configs, CVE-2025-61260).",
+                "fix": "Pin an allowlist of specific, known servers. Require human confirmation before any new server is added. Treat tool descriptions and tool outputs as untrusted data with no authority over instructions. (Checklist #9, #10)",
+            })
+        elif mutable_lines:
+            findings.append({
+                "id": "PI-MCP", "severity": "High",
+                "title": "Agent can register or connect MCP servers with no stated integrity check",
+                "lines": mutable_lines,
+                "detail": "A poisoned tool description or a malicious server can override instructions or exfiltrate data through the tool layer even without a direct execution path.",
+                "fix": "Require a pinned allowlist and verify server identity before connecting. Never treat tool metadata as authoritative. (Checklist #5, #9)",
+            })
+        else:
+            findings.append({
+                "id": "PI-MCP", "severity": "Medium",
+                "title": "MCP/tool-server surface present with no untrusted-content rule for tool metadata",
+                "lines": mcp_lines,
+                "detail": "Tool poisoning injects instructions through the tool schema itself, not just the tool output.",
+                "fix": "State explicitly that tool descriptions and tool results carry no authority over the agent's instructions. (Checklist #1, #5)",
+            })
+
+    if has_exec:
+        gate_lines = find_lines(text, SANDBOX_GATE_PATTERN)
+        bypass_aware_lines = find_lines(text, SANDBOX_BYPASS_AWARE_PATTERN)
+        if gate_lines and not bypass_aware_lines:
+            findings.append({
+                "id": "PI-SANDBOX-BYPASS", "severity": "High",
+                "title": "Command gating relies on allow/deny-listed strings with no stated obfuscation defense",
+                "lines": gate_lines,
+                "detail": "Denylists fall to obfuscation (ModelScope MS-Agent, CVE-2026-2256, CVSS 6.5 — regex denylist bypass) and path-based gates fall to symlink/canonicalization tricks (Cursor, CVE-2026-50549, CVSS 9.8).",
+                "fix": "Gate on parsed intent, not string matching. Canonicalize and normalize input before any allow/deny decision. (Checklist #13, #17)",
+            })
+
+        workdir_lines = find_lines(text, SANDBOX_WORKDIR_PATTERN)
+        if workdir_lines:
+            findings.append({
+                "id": "PI-SANDBOX-BYPASS", "severity": "High",
+                "title": "Sandbox or trust decision keys off a path or environment variable the agent can influence",
+                "lines": workdir_lines,
+                "detail": "Letting the agent's own output or working-directory choice influence the sandbox boundary lets injected content redefine that boundary (Cursor DuneSlide, CVE-2026-50548, CVSS 9.8; Codex CLI, CVE-2025-59532 — model-generated cwd became the sandbox root).",
+                "fix": "The enforcer, never the agent, owns the working directory and environment. Validate both outside the agent's influence. (Checklist #17)",
+            })
+
+    memory_lines = find_lines(text, MEMORY_PATTERN)
+    for pattern in ARABIC_MEMORY_PATTERNS:
+        memory_lines.extend(find_lines(normalized_ar, pattern))
+    memory_guarded = find_lines(text, MEMORY_GUARD_PATTERN)
+    for pattern in ARABIC_MEMORY_GUARD_PATTERNS:
+        memory_guarded.extend(find_lines(normalized_ar, pattern))
+    if memory_lines and not memory_guarded:
+        findings.append({
+            "id": "PI-MEMORY", "severity": "High" if ingest_lines else "Medium",
+            "title": "Persistent memory is written with no integrity or provenance rule",
+            "lines": memory_lines,
+            "detail": "An instruction injected once and stored in long-term memory persists into every future session, replayed with the same authority as the system prompt.",
+            "fix": "State that memory content is data, never instructions. Do not write untrusted content to memory verbatim; attach provenance and review before replay. (Checklist #5, #15)",
+        })
+
+    if has_exec:
+        fetch_lines = find_lines(text, SUPPLY_CHAIN_FETCH_PATTERN)
+        for pattern in ARABIC_SUPPLY_CHAIN_FETCH_PATTERNS:
+            fetch_lines.extend(find_lines(normalized_ar, pattern))
+        if fetch_lines:
+            model_named = bool(find_lines(text, SUPPLY_CHAIN_MODEL_NAMED_PATTERN))
+            findings.append({
+                "id": "PI-SUPPLY-CHAIN",
+                "severity": "High" if model_named else "Medium",
+                "title": (
+                    "Agent installs or fetches packages/repos using names it selects itself"
+                    if model_named else
+                    "Agent installs or fetches packages/repos with no name pinning stated"
+                ),
+                "lines": fetch_lines,
+                "detail": "Attackers pre-register the fake package/repo names models reliably invent ('slopsquatting'), seed them with malicious code plus hidden injection, and wait for the agent to fetch the attacker copy. Repo-borne configs show the same trust failure in the wild (Codex CLI, CVE-2025-61260; Amazon Q, CVE-2026-12957).",
+                "fix": "Never install a model-produced identifier. Pin names and verify against a lockfile or known-good index before any install. (Checklist #10, #17)",
+            })
 
     def missing(english_patterns, arabic_patterns, finding_id, severity, title, detail, fix):
         if not (_has_any(low, english_patterns) or _has_any(normalized_ar, arabic_patterns)):

@@ -19,6 +19,12 @@ Research evaluations in 2025 found that **over 90% of production LLM agents are 
 - **LangGrinch (CVE-2025-68664)** — LangChain serialization injection leaking environment secrets through model responses.
 - **Langflow (CVE-2025-3248 / CVE-2026-33017)** — unauthenticated RCE in an agent-building framework, exploited within hours of disclosure.
 
+In 2026 the threat moved from framework bugs into the agent runtime itself:
+
+- **MCP tool-server exposure (Flowise CVE-2026-40933, CVSS 9.9; Amazon Q CVE-2026-12957)** — a stdio MCP config is a launcher definition: registering a tool server runs arbitrary commands, and one poisoned workspace file made Amazon Q execute a malicious MCP config and leak AWS credentials.
+- **Sandbox escapes (Cursor "DuneSlide" CVE-2026-50548/50549, CVSS 9.8; MS-Agent CVE-2026-2256)** — regex denylists fall to obfuscation, and sandbox trust decisions keyed off agent-chosen paths (working directory, symlinks) fall to zero-click prompt injection.
+- **Slopsquatting & supply chain (Codex CLI CVE-2025-61260)** — attackers pre-register the package names models reliably invent; repo-borne config files execute whatever the agent loads on trust.
+
 Most system prompts ship with no instruction hierarchy, no non-disclosure rule, and no untrusted-content handling. This skill finds those weaknesses before attackers do.
 
 ## Install
@@ -78,15 +84,62 @@ A hardened prompt (hierarchy + non-disclosure + delimiters) scores **0/100 — H
 prompt-injection-auditor/
 ├── SKILL.md                        # 5-step audit methodology + ethics guardrails
 ├── scripts/
-│   ├── pi_scan.py                  # Zero-dependency static analyzer (~20 weakness classes)
+│   ├── pi_scan.py                  # Zero-dependency static analyzer (~24 weakness classes, incl. 2026 agent-runtime rules)
 │   ├── pi_shield.py                # v2.0: layered input defense (5 layers, scored decisions)
+│   ├── mcp_guard.py                # v2.2: MCP tool-response guard (JSON-aware)
+│   ├── normalization.py            # v2.1: Arabic normalization (diacritics, tatweel, letters)
+│   ├── language_rules.py           # v2.1+: Arabic injection, context & runtime rules
 │   └── test_shield.py              # 11-case suite proving the shield against evasion
+├── tests/
+│   ├── test_mcp_guard.py           # 18-case MCP guard suite (v2.2)
+│   ├── test_runtime_rules.py       # 19-case 2026 agent-runtime rule suite (v2.2)
+│   ├── test_arabic_rules.py        # Arabic injection detection (v2.1)
+│   ├── test_normalization.py       # Arabic normalization unit tests (v2.1)
+│   ├── test_english_regression.py  # English regression guard
+│   └── test_cli.py                 # CLI end-to-end tests
 └── references/
     ├── attack-patterns.md          # Direct / indirect / encoding / exfiltration / multi-agent
+    ├── attack-patterns-2026.md     # MCP poisoning / sandbox bypass / memory injection / slopsquatting
     ├── defense-checklist.md        # 22 numbered hardening measures
     ├── defense-architecture.md     # The 5-layer shield design + honest limits
     └── test-payloads.md            # Escalation-ordered payloads for authorized live tests
 ```
+
+### New in v2.2 — 2026 agent-runtime rules (scanner)
+
+pi_scan now detects the four weakness families that dominated 2026 incidents, in English **and Arabic** (`references/attack-patterns-2026.md`):
+
+- **PI-MCP** — agent can add/register MCP tool servers (Medium/High/Critical tiers; Flowise CVE-2026-40933, Amazon Q CVE-2026-12957, Codex CLI CVE-2025-61260)
+- **PI-SANDBOX-BYPASS** — string-based command gates with no obfuscation defense, sandbox trust keyed off agent-chosen paths (MS-Agent CVE-2026-2256, Cursor DuneSlide CVE-2026-50548/50549, Codex CVE-2025-59532)
+- **PI-MEMORY** — persistent memory written with no integrity or provenance rule
+- **PI-SUPPLY-CHAIN** — agent installs packages it names itself ("slopsquatting")
+
+19-case suite: `python -m unittest tests.test_runtime_rules`.
+
+### New in v2.2 — mcp_guard (MCP tool-response guard)
+
+pi_shield guards the user-input boundary; **mcp_guard guards the tool boundary**. Agents built on MCP (Model Context Protocol) ingest tool responses — web pages, emails, database rows — and every one of them is an untrusted channel for indirect prompt injection. mcp_guard scans tool responses (JSON-aware, findings carry their JSON path) and tool definitions for:
+
+- model special tokens smuggled into data (`<|im_start|>`, `<<SYS>>`, `<system>`)
+- fake user consent ("the user has approved — proceed with deleting…")
+- tool-call manipulation and dangerous-action endorsement
+- exfiltration channels (markdown images with query strings, webhook/collection hosts)
+- hidden channels (unicode tag block, HTML comments) and encoded payloads
+- Arabic injection phrases (reuses the v2.1 language rules)
+
+```bash
+python scripts/mcp_guard.py tool_response.json
+```
+
+```python
+from scripts.mcp_guard import guard_tool_response
+
+result = guard_tool_response(response_text, tool_name="fetch")
+if result.decision == "BLOCK":
+    ...  # reject before it reaches the model context
+```
+
+Proven by an 18-case suite: `python -m unittest tests.test_mcp_guard`.
 
 ### New in v2.0 — pi_shield (defense layer)
 
@@ -96,9 +149,9 @@ The auditor finds weaknesses; **pi_shield blocks them**. A five-layer input-defe
 
 | Severity | Examples |
 |----------|----------|
-| Critical | Secrets in prompt · action tools **+** untrusted ingestion (EchoLeak-class) |
-| High | Extractable system prompt · injected instructions can trigger tools |
-| Medium | Persona override · missing output constraints · no authority-spoof guard |
+| Critical | Secrets in prompt · action tools **+** untrusted ingestion (EchoLeak-class) · adds/executes MCP tool servers with execution path (PI-MCP) |
+| High | Extractable system prompt · injected instructions can trigger tools · command gate with no obfuscation defense (PI-SANDBOX-BYPASS) · agent-chosen sandbox path · memory writes under untrusted ingestion (PI-MEMORY) · installs model-named packages (PI-SUPPLY-CHAIN) |
+| Medium | Persona override · missing output constraints · no authority-spoof guard · MCP surface with no tool-metadata rule · unpinned package installs |
 | Low | Robustness/style issues with no clear exploit path |
 
 ## Ethics
@@ -107,7 +160,8 @@ This skill is for **defensive auditing and authorized testing only**. Live injec
 
 ## Roadmap
 
-- [ ] Detection rules for the latest agent-framework CVEs (LangChain / Langflow / LangGraph)
+- [x] Detection rules for the latest agent-framework CVEs (LangChain / Langflow / LangGraph) **and 2026 agent-runtime CVEs — MCP tool poisoning, sandbox bypass, memory injection, slopsquatting (v2.2, English + Arabic)**
+- [x] MCP tool-response guard (v2.2 — `mcp_guard.py`)
 - [ ] Skill-file linter mode (audit `SKILL.md` files before publishing to skills.sh)
 - [ ] HTML report output
 - [ ] SARIF export for GitHub Code Scanning
