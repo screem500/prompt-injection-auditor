@@ -108,7 +108,8 @@ prompt-injection-auditor/
 
 ### New in v2.2 — 2026 agent-runtime rules (scanner)
 
-pi_scan now detects the four weakness families that dominated 2026 incidents, in English **and Arabic** (`references/attack-patterns-2026.md`):
+pi_scan now 2026 agent-runtime detection rules — MCP tool poisoning, sandbox bypass, memory injection, slopsquatting (v2.2, English + Arabic)
+Detection rules for agent-framework CVEs (LangChain / Langflow / LangGraph) (`references/attack-patterns-2026.md`):
 
 - **PI-MCP** — agent can add/register MCP tool servers (Medium/High/Critical tiers; Flowise CVE-2026-40933, Amazon Q CVE-2026-12957, Codex CLI CVE-2025-61260)
 - **PI-SANDBOX-BYPASS** — string-based command gates with no obfuscation defense, sandbox trust keyed off agent-chosen paths (MS-Agent CVE-2026-2256, Cursor DuneSlide CVE-2026-50548/50549, Codex CVE-2025-59532)
