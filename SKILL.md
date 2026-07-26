@@ -34,7 +34,7 @@ Obtain one or more of: the system prompt text, agent instruction files (`SKILL.m
 python scripts/pi_scan.py <target-file> [--json report.json] [--md report.md]
 ```
 
-The scanner checks for ~20 weakness classes (missing instruction hierarchy, secret-like strings, leak-prone phrasing, missing output constraints, untrusted-content handling gaps) and outputs a 0–100 risk score with findings. Treat scanner output as leads, not verdicts — verify each finding by reading the target.
+The scanner checks for ~24 weakness classes (missing instruction hierarchy, secret-like strings, leak-prone phrasing, missing output constraints, untrusted-content handling gaps) and outputs a 0–100 risk score with findings. Treat scanner output as leads, not verdicts — verify each finding by reading the target.
 
 ### Step 3: Manual review with the attack catalog
 
