@@ -31,7 +31,8 @@ Most system prompts ship with no instruction hierarchy, no non-disclosure rule, 
 ## Install
 
 ```bash
-npx skills add screem500/prompt-injection-auditor```
+npx skills add screem500/prompt-injection-auditor
+```
 
 ## Usage
 
