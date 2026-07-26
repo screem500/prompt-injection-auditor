@@ -149,6 +149,8 @@ if result.decision == "BLOCK":
 
 Proven by an 18-case suite: `python -m unittest tests.test_mcp_guard`.
 
+Note: mcp_guard.py here is unrelated to General-Analysis/mcp-guard — the overlap is coincidental; ours is a JSON-level scanner for MCP configs and tool responses.
+
 ### New in v2.0 — pi_shield (defense layer)
 
 The auditor finds weaknesses; **pi_shield blocks them**. A five-layer input-defense middleware: unicode/homoglyph normalization, safe delimiting with closing-tag neutralization, weighted threat scoring (ALLOW/WARN/BLOCK), base64/hex payload inspection, and canary leak detection. Defeats the evasion techniques that break naive filters — closing-tag escapes, zero-width characters, Cyrillic homoglyphs, encoded commands — proven by an 11-case test suite (`python -m unittest tests.test_shield`).
