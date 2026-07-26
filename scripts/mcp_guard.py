@@ -67,6 +67,10 @@ MCP_PATTERNS = [
     (r"<\|(?:im_start|im_end|endoftext|system|assistant|user)\|?>", 60, "model special-token injection"),
     (r"<<\s*/?\s*SYS\s*>>|\[\s*/?\s*INST\s*\]", 60, "model special-token injection"),
     (r"</?(?:system|assistant)\s*>", 60, "role-tag injection"),
+    # <s>/</s> are real BOS/EOS tokens (Llama, Mistral). Kept at warn weight:
+    # NLP corpus data can carry them legitimately, but inside tool data they
+    # usually mean transcript forgery.
+    (r"</?s>", 30, "BOS/EOS token smuggling"),
     (r"^\s*#{1,4}\s*(?:system|instructions?)\s*$", 30, "fake markdown system header"),
 
     # Fake consent — a tool result cannot know what the user approved. Injected
