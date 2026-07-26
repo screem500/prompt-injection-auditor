@@ -73,14 +73,14 @@ def paint(text, code):
 
 
 SECRET_PATTERNS = [
-    (r"sk-[a-zA-Z0-9]{20,}", "OpenAI-style API key"),
+    (r"sk-(proj-|svcacct-|admin-)?[a-zA-Z0-9_\-]{20,}", "OpenAI-style API key"),
     (r"sk-ant-[a-zA-Z0-9\-]{20,}", "Anthropic-style API key"),
     (r"ghp_[a-zA-Z0-9]{30,}", "GitHub personal access token"),
     (r"AIza[0-9A-Za-z\-_]{30,}", "Google API key"),
     (r"AKIA[0-9A-Z]{16}", "AWS access key ID"),
     (r"xox[baprs]-[0-9a-zA-Z\-]{10,}", "Slack token"),
     (r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----", "Private key"),
-    (r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[a-zA-Z0-9\-_/+.]{16,}", "Hardcoded credential-like value"),
+    (r"(?i)(api[\s_-]?key|secret|token|password)\s*[:=]\s*['\"]?[a-zA-Z0-9\-_/+.]{16,}", "Hardcoded credential-like value"),
 ]
 
 HIERARCHY_PATTERNS = [
@@ -161,7 +161,7 @@ MEMORY_PATTERN = r"(?i)(long[- ]?term memory|persistent memory|memory store|reme
 MEMORY_GUARD_PATTERN = r"(?i)(memory integrity|signed memory|memory provenance|review\w*.{0,25}before.{0,25}(writing|storing).{0,20}memory|memory is data)"
 
 SUPPLY_CHAIN_FETCH_PATTERN = r"(?i)(npm install|pip install|npx |yarn add|go get|cargo add|git clone|clone the repo|download the package|fetch the package|add (a |the )?dependency)"
-SUPPLY_CHAIN_MODEL_NAMED_PATTERN = r"(?i)(the (real|official|correct) (package|library|repo|module)|whatever package (fits|is needed)|install the right (package|library))"
+SUPPLY_CHAIN_MODEL_NAMED_PATTERN = r"(?i)(the (real|official|correct) (package|library|repo|module)|whatever package (fits|is needed)|install the right (package|library)|packages? (you|the model|the agent) (think|believe|decide|deem)|any (package|library|dependency) (you |it )?(need|require)|(?:packages?|librar(?:y|ies)|dependenc(?:y|ies))[a-z ,]{0,20}(?:as|if) needed|determine which (package|library))"
 
 
 def find_lines(text, pattern, skip_context_patterns=None):
@@ -300,7 +300,7 @@ def scan(text):
                 "title": "Agent can add/configure MCP tool servers with no execution or serialization boundary",
                 "lines": sorted(set(mutable_lines + unsafe_lines)),
                 "detail": "Adding a tool server is equivalent to granting code execution. If injected content can reach the server-add path, that is unauthenticated RCE by proxy (Flowise Custom MCP stdio, CVE-2026-40933, CVSS 9.9; Amazon Q auto-loaded workspace MCP configs, CVE-2026-12957; Codex CLI repo-borne MCP configs, CVE-2025-61260).",
-                "fix": "Pin an allowlist of specific, known servers. Require human confirmation before any new server is added. Treat tool descriptions and tool outputs as untrusted data with no authority over instructions. (Checklist #9, #10)",
+                "fix": "Pin an allowlist of specific, known servers. Require human confirmation before any new server is added. Treat tool descriptions and tool outputs as untrusted data with no authority over instructions. (Checklist #24, #9, #10)",
             })
         elif mutable_lines:
             findings.append({
@@ -308,7 +308,7 @@ def scan(text):
                 "title": "Agent can register or connect MCP servers with no stated integrity check",
                 "lines": mutable_lines,
                 "detail": "A poisoned tool description or a malicious server can override instructions or exfiltrate data through the tool layer even without a direct execution path.",
-                "fix": "Require a pinned allowlist and verify server identity before connecting. Never treat tool metadata as authoritative. (Checklist #5, #9)",
+                "fix": "Require a pinned allowlist and verify server identity before connecting. Never treat tool metadata as authoritative. (Checklist #24, #5, #9)",
             })
         else:
             findings.append({
@@ -316,7 +316,7 @@ def scan(text):
                 "title": "MCP/tool-server surface present with no untrusted-content rule for tool metadata",
                 "lines": mcp_lines,
                 "detail": "Tool poisoning injects instructions through the tool schema itself, not just the tool output.",
-                "fix": "State explicitly that tool descriptions and tool results carry no authority over the agent's instructions. (Checklist #1, #5)",
+                "fix": "State explicitly that tool descriptions and tool results carry no authority over the agent's instructions. (Checklist #24, #5)",
             })
 
     if has_exec:
@@ -328,7 +328,7 @@ def scan(text):
                 "title": "Command gating relies on allow/deny-listed strings with no stated obfuscation defense",
                 "lines": gate_lines,
                 "detail": "Denylists fall to obfuscation (ModelScope MS-Agent, CVE-2026-2256, CVSS 6.5 — regex denylist bypass) and path-based gates fall to symlink/canonicalization tricks (Cursor, CVE-2026-50549, CVSS 9.8).",
-                "fix": "Gate on parsed intent, not string matching. Canonicalize and normalize input before any allow/deny decision. (Checklist #13, #17)",
+                "fix": "Gate on parsed intent, not string matching. Canonicalize and normalize input before any allow/deny decision. (Checklist #25, #13, #17)",
             })
 
         workdir_lines = find_lines(text, SANDBOX_WORKDIR_PATTERN)
@@ -338,7 +338,7 @@ def scan(text):
                 "title": "Sandbox or trust decision keys off a path or environment variable the agent can influence",
                 "lines": workdir_lines,
                 "detail": "Letting the agent's own output or working-directory choice influence the sandbox boundary lets injected content redefine that boundary (Cursor DuneSlide, CVE-2026-50548, CVSS 9.8; Codex CLI, CVE-2025-59532 — model-generated cwd became the sandbox root).",
-                "fix": "The enforcer, never the agent, owns the working directory and environment. Validate both outside the agent's influence. (Checklist #17)",
+                "fix": "The enforcer, never the agent, owns the working directory and environment. Validate both outside the agent's influence. (Checklist #25, #17)",
             })
 
     memory_lines = find_lines(text, MEMORY_PATTERN)
@@ -353,7 +353,7 @@ def scan(text):
             "title": "Persistent memory is written with no integrity or provenance rule",
             "lines": memory_lines,
             "detail": "An instruction injected once and stored in long-term memory persists into every future session, replayed with the same authority as the system prompt.",
-            "fix": "State that memory content is data, never instructions. Do not write untrusted content to memory verbatim; attach provenance and review before replay. (Checklist #5, #15)",
+            "fix": "State that memory content is data, never instructions. Do not write untrusted content to memory verbatim; attach provenance and review before replay. (Checklist #26, #5, #15)",
         })
 
     if has_exec:
@@ -372,7 +372,7 @@ def scan(text):
                 ),
                 "lines": fetch_lines,
                 "detail": "Attackers pre-register the fake package/repo names models reliably invent ('slopsquatting' — USENIX Security 2025, Spracklen et al.: 19.7% of model-recommended packages don't exist, 43% of fakes repeat every run), seed them with malicious code plus hidden injection, and wait for the agent to fetch the attacker copy.",
-                "fix": "Never install a model-produced identifier. Pin names and verify against a lockfile or known-good index before any install. (Checklist #10, #17)",
+                "fix": "Never install a model-produced identifier. Pin names and verify against a lockfile or known-good index before any install. (Checklist #27, #10, #17)",
             })
 
     def missing(english_patterns, arabic_patterns, finding_id, severity, title, detail, fix):
