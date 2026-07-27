@@ -113,3 +113,16 @@ verdict = guard_tool_definition(server_tool_schema)
 JSON-aware: every string value is scanned and findings carry their JSON path (`$.result.content[0].text`), so operators see exactly which field was poisoned.
 
 Honest limits, same as for pi_shield: this is one layer. A determined attacker with a novel phrasing can still slip through — pair it with least-privilege tool design, human-in-the-loop for consequential actions, and egress allow-lists.
+
+## Session Risk State (v3.0.0a8)
+
+Stateless filtering misses payloads split across several user turns. `SessionRiskState`
+keeps a bounded, per-conversation history and re-evaluates the active transcript. It
+adds two session-level findings:
+
+- `PI-MULTITURN-FRAGMENT` — an injection signature exists only after recent turns are joined.
+- `PI-MULTITURN-REPEATED-PROBING` — several recent turns contain suspicious probes.
+
+The state uses TTL expiry, a maximum turn count, score decay, and a transcript-size
+limit. State must be isolated per user/session. Serialized state is never trusted:
+stored messages are re-analyzed when restored.

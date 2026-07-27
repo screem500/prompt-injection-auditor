@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompt-injection-auditor"
+version = "3.0.0a8"
+description = "Static prompt-injection auditing and runtime guards for LLM agents"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{name = "NerO"}]
+keywords = ["llm-security", "prompt-injection", "mcp", "ai-security"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = []
+
+[project.scripts]
+pi-audit = "pi_auditor.cli:main"
+pi-scan = "pi_auditor.scanner:main"
+pi-shield = "pi_auditor.shield:_main"
+mcp-guard = "pi_auditor.mcp_guard:_main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+
+[tool.ruff]
+target-version = "py38"
+line-length = 110
+
+[tool.mypy]
+python_version = "3.8"
+check_untyped_defs = true
+warn_unused_ignores = true
