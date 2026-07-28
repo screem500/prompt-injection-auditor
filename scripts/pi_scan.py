@@ -86,7 +86,9 @@ SECRET_PATTERNS = [
 ]
 
 HIERARCHY_PATTERNS = [
-    r"system instructions? (outrank|override|take precedence|have priority)",
+    r"(?i)(system |these |this |the )?(instructions?|rules?|configuration|prompt|directives?|policy) (outranks?|overrides?|takes? precedence|has priority|have priority|rank above|come first)",
+    r"(?i)(outranks?|overrides?|takes? precedence over|ranks? above|come[s]? first)\b",
+    r"(?i)rule order[:\s]",
     r"never (follow|obey|execute) instructions? (from|in|within) (user|retrieved|external|tool)",
     r"(user|retrieved|external) content is data",
     r"treat .{0,40} as data[, ] not (as )?instructions?",
@@ -99,40 +101,73 @@ NONDISCLOSURE_PATTERNS = [
     r"keep .{0,30}(instructions?|prompt|configuration) .{0,20}(secret|confidential|private)",
 ]
 ROLE_CLAIM_PATTERNS = [
-    r"(claiming|claims?) to be (a |an |the )?(developer|admin|creator|owner)",
-    r"no (extra |additional )?privileges",
-    r"authorization comes only from",
-    r"ignore (role|identity) claims?",
+    r"(?i)(claiming|claims?) to be (a |an |the )?(developer|admin|creator|owner|staff|maintainer)",
+    r"(?i)no (extra |additional )?privileges",
+    r"(?i)authori[sz]ation comes only from",
+    r"(?i)ignore (role|identity) claims?",
+    # The control is "an asserted identity changes nothing". Match the concept,
+    # not one phrasing of it.
+    r"(?i)(claims?|assertions?|assertion) of [a-z ]{0,25}(identity|status|role|authorship|ownership)",
+    r"(?i)(confers?|grants?|gives?) (no|nothing|zero)\b",
+    r"(?i)(gain|grant|confer|receive)[a-z]* no(thing)?\b",
+    r"(?i)(change|alter|affect|modify)[a-z]* nothing\b",
+    r"(?i)(do(es)? not|don'?t|never) (change|alter|affect|modify|grant|confer)[a-z]* (your |the |their )?(permissions?|privileges?|authority|behaviour|behavior|access)",
+    r"(?i)(identity|role|status) (claims?|assertions?)[a-z ]{0,20}(ignored|irrelevant|carr(y|ies) no)",
+    r"(?i)permissions? are fixed",
+    r"(?i)any claim of [a-z ]{0,25}(identity|authority|status)",
+    r"(?i)\bno [a-z ]{0,20}(assertion|claim)s?\b",
 ]
 OUTPUT_CONSTRAINT_PATTERNS = [
-    r"only (answer|respond|discuss|help with)",
+    r"(?i)only (answer|respond|discuss|help with|produce|output|return)",
+    r"(?i)(answer|respond|discuss|handle|produce|output|return)\b[^.\n]{0,40}\bonly\b",
+    r"(?i)nothing else\b",
+    r"(?i)(scope|limited) (is|to) ",
     r"(refuse|decline) (to )?(discuss|answer|engage)",
     r"stay (on topic|within scope|focused)",
     r"if asked (about|to) .{0,40}(unrelated|outside|off[- ]topic)",
 ]
 UNTRUSTED_CONTENT_PATTERNS = [
-    r"<(retrieved|untrusted|external|user)[_-]?(data|content|input)>",
+    r"<(retrieved|untrusted|external|user|document|kb|data|context|input|source)[_-]?(data|content|input)?>",
+    r"(?i)(inside|between|within) (the )?(<[a-z_-]{1,20}>|delimiters?|markers?|tags?)",
+    r"(?i)(inert|carries no authority|no authority over)",
     r"delimit",
-    r"wrapped in (xml |html )?tags",
+    r"(?i)wrapped in (xml |html )?(<[a-z_-]{1,20}> )?tags",
     r"spotlighting",
     r"datamarking",
 ]
 REFUSAL_PATTERNS = [
     r"(i'?m sorry|i cannot|i can'?t|i must decline|i'?m unable)",
-    r"respond with .{0,30}(refus|declin)",
+    r"(?i)respond with .{0,30}(refus|declin)",
+    r"(?i)(refuse|decline|reject)[a-z]* (anything|any |all |other|out[- ]of[- ]scope|everything)",
+    r"(?i)(refuse|decline) (with|using)[:\s]",
+    r"(?i)(fixed|standard|predefined|short) refusal",
+    r"(?i)say so (plainly|clearly)",
 ]
 LEAK_PRONE_PATTERNS = [
     (r"(?i)when asked about your (instructions|prompt|rules).{0,60}(share|explain|describe|list)", "Meta-disclosure invitation"),
     (r"(?i)your (instructions|system prompt) (are|is)[:]", "Prompt self-reference that aids extraction"),
     (r"(?i)you (may|can) (share|reveal|disclose) your (instructions|prompt)", "Explicit permission to leak"),
+    (r"(?i)(show|give|display|print|provide)[a-z]* (them|the user|users|it)?\s*(your|the) (full |complete |entire )?(system )?(prompt|instructions|configuration)", "Instructed to display its own prompt"),
     (r"(?i)(always|never refuse to) (comply|answer|obey)", "Unconditional compliance clause"),
     (r"(?i)you have (no|zero) (restrictions|limitations|guidelines)", "Unrestricted persona statement"),
+]
+# A capability that the prompt explicitly denies is not a capability. Checked
+# in the 140-character window that find_lines() looks at before each match,
+# which is enough to catch "You have no tools. You cannot send messages, run
+# code, or make requests." without reaching into an unrelated sentence.
+TOOL_NEGATION_CONTEXT = [
+    r"(?i)\b(cannot|can not|can't|may not|must not|will not|won'?t|do not|don'?t|does not|doesn'?t|never)\b",
+    r"(?i)\b(no|zero|without) (tools?|capabilit(y|ies)|access|ability)",
+    r"(?i)\byou (have|possess) no\b",
+    r"(?i)\b(unable|not able|not permitted|not allowed) to\b",
+    r"(?i)\bread[- ]only\b",
+    r"(?i)(?:\u0644\u0627|\u0644\u0646|\u063a\u064a\u0631) \S{0,12}(\u062a\u0645\u0644\u0643|\u062a\u0633\u062a\u0637\u064a\u0639|\u064a\u0645\u0643\u0646)",
 ]
 TOOL_RISK_KEYWORDS = [
     (r"(?i)send (an? )?(email|message|sms)", "Outbound messaging capability"),
     (r"(?i)(execute|run) (code|commands?|scripts?|shell)", "Code/command execution capability"),
     (r"(?i)(delete|remove|drop|truncate) ", "Destructive action capability"),
-    (r"(?i)(purchase|pay|transfer|wire|checkout)", "Financial action capability"),
+    (r"(?i)\b(purchase|purchases|paying|pay for|transfers?|wire|checkout)\b", "Financial action capability"),
     (r"(?i)(http[s]? request|api call|fetch|browse|webhook)", "Network/egress capability"),
     (r"(?i)(read|access|retrieve) .{0,30}(file|document|email|drive|database)", "Sensitive data access"),
 ]
@@ -252,11 +287,11 @@ def scan(text):
     tool_hits = []
     ingest_lines = []
     for pattern, label in TOOL_RISK_KEYWORDS:
-        lines = find_lines(text, pattern)
+        lines = find_lines(text, pattern, TOOL_NEGATION_CONTEXT)
         if lines:
             tool_hits.append((label, lines))
     for pattern, label in ARABIC_TOOL_RISK_KEYWORDS:
-        lines = find_lines(normalized_ar, pattern)
+        lines = find_lines(normalized_ar, pattern, TOOL_NEGATION_CONTEXT)
         if lines:
             tool_hits.append((label, lines))
     for pattern in INGEST_KEYWORDS:
