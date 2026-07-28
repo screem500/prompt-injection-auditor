@@ -126,7 +126,7 @@ pi_scan now detects the five weakness families that dominated 2026 incidents, in
 
 - PI-AUTOLOAD-CONFIG - workspace configuration auto-loaded before any trust decision (Codex CLI CVE-2025-61260, Claude Code CVE-2025-59536, Cursor CVE-2025-54136 / MCPoison). High by default, Critical when the agent can also execute. Fix: checklist #28.
 19-case suite: `python -m unittest tests.test_runtime_rules`.
-8-case suite: python -m unittest tests.test_autoload_rule
+8-case suite: `python -m unittest tests.test_autoload_rule`.
 
 ### New in v2.2 — mcp_guard (MCP tool-response guard)
 
