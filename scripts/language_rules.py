@@ -147,6 +147,13 @@ ARABIC_INGEST_KEYWORDS = [
 # hamzated alef -> ا). Sandbox gate/workdir terms stay English-only in
 # pi_scan: those phrases appear in English even inside Arabic prompts.
 
+ARABIC_AUTOLOAD_PATTERNS = [
+    r"(?:ملف|ملفات)\s*(?:الـ)?(?:إعداد|اعداد|تهيئه|تهيئة|تكوين)",
+    r"(?:تحميل|قراءه|قراءة|تطبيق)\s*(?:تلقائي|تلقائيا|أوتوماتيكي)",
+    r"(?:عند|لدى)\s*(?:فتح|تحميل|بدء)\s*(?:المستودع|المشروع|مساحه العمل|مساحة العمل)",
+    r"(?:يقرأ|يقرا|تقرأ|تقرا|يحمل|تحمل)[^\n]{0,40}(?:جذر\s*)?(?:المستودع|المشروع|مساحه العمل|مساحة العمل)",
+]
+
 ARABIC_MCP_PRESENT_PATTERNS = [
     r"(?:\bmcp\b|بروتوكول\s+سياق\s+النموذج|خادم\s+(?:ال)?ادوات|خوادم\s+(?:ال)?ادوات)",
 ]
