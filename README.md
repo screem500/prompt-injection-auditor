@@ -9,6 +9,8 @@ Static scanner + attack catalog + defense checklist + authorized red-team payloa
 
 Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open [Agent Skills](https://agentskills.io) standard.
 
+**Measured:** separation between hardened and vulnerable prompts improved from 8.3 to 40.6 points, with zero false positives on the hardened corpus. See [VALIDATION.md](VALIDATION.md).
+
 ![live demo](demo-prompt-injection-auditor.gif)
 
 ## Why?
@@ -100,6 +102,7 @@ prompt-injection-auditor/
 │   ├── test_normalization.py       # Arabic normalization unit tests (v2.1)
 │   ├── test_english_regression.py  # English regression guard
 │   └── test_cli.py                 # CLI end-to-end tests
+├── VALIDATION.md                  # precision measurement: method, results, limits
 └── references/
     ├── attack-patterns.md          # Direct / indirect / encoding / exfiltration / multi-agent
     ├── attack-patterns-2026.md     # MCP poisoning / sandbox bypass / memory injection / slopsquatting
@@ -107,6 +110,7 @@ prompt-injection-auditor/
     ├── defense-checklist.md        # 27 numbered hardening measures
     ├── defense-architecture.md     # The 5-layer shield design + honest limits
     └── test-payloads.md            # Escalation-ordered payloads for authorized live tests
+
 ```
 
 Run the full test suite with `python -m unittest discover tests`.
