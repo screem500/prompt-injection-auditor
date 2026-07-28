@@ -1,6 +1,6 @@
 # Rule Inventory — pi_scan
 
-Complete index of the scanner's rule IDs: 15 rules, each mapped to its
+Complete index of the scanner's rule IDs: 16 rules, each mapped to its
 severity behavior and its defense-checklist item. When a rule ID changes,
 update this table in the same commit — an undocumented rule is a broken promise.
 
@@ -28,6 +28,7 @@ update this table in the same commit — an undocumented rule is a broken promis
 | PI-SANDBOX-BYPASS | High | String-based command gates with no obfuscation defense; sandbox trust keyed off agent-chosen paths | #25 |
 | PI-MEMORY | Medium / High | Persistent memory with no integrity/provenance rule; worse under untrusted ingestion | #26 |
 | PI-SUPPLY-CHAIN | Medium / High | Agent installs packages with no name pinning; model picks the names ("slopsquatting") | #27 |
+| PI-AUTOLOAD-CONFIG | High / Critical | Workspace config (`.cursorrules`, `CLAUDE.md`, `.mcp.json`, devcontainer) auto-loaded before a trust decision; Critical when the agent can also execute | #28 |
 
 *Note: PI-SUPPLY-CHAIN and PI-SANDBOX-BYPASS are gated on a declared execution capability (`has_exec`). Without an exec surface there is no supply-chain or sandbox risk by design — a prompt that merely discusses installing packages is not flagged.*
 

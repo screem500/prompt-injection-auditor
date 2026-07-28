@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 if __package__:  # Imported as scripts.pi_scan during tests or library use.
     from .language_rules import (
+        ARABIC_AUTOLOAD_PATTERNS,
         ARABIC_DEFENSIVE_CONTEXT_PATTERNS,
         ARABIC_HIERARCHY_PATTERNS,
         ARABIC_INGEST_KEYWORDS,
@@ -36,6 +37,7 @@ if __package__:  # Imported as scripts.pi_scan during tests or library use.
     from .normalization import normalize_arabic, suspicious_unicode_lines
 else:  # Direct execution: python scripts/pi_scan.py ...
     from language_rules import (  # type: ignore
+        ARABIC_AUTOLOAD_PATTERNS,
         ARABIC_DEFENSIVE_CONTEXT_PATTERNS,
         ARABIC_HIERARCHY_PATTERNS,
         ARABIC_INGEST_KEYWORDS,
@@ -152,6 +154,15 @@ EXEC_TOOL_PATTERN = r"(?i)(\bbash\b|\bshell\b|\bterminal\b|subprocess|os\.system
 MCP_PRESENT_PATTERN = r"(?i)(\bmcp\b|model context protocol|tool[- ]server)"
 MCP_MUTABLE_PATTERN = r"(?i)(add|register|install|configure|connect|attach) .{0,20}(mcp|tool[- ]server|connector)"
 MCP_UNSAFE_PATTERN = r"(?i)(stdio|serializ\w*|deserializ\w*|pickle|command string|spawn|child process)"
+
+# PI-AUTOLOAD-CONFIG: a config file read out of the workspace before any trust
+# decision. Distinct from PI-MCP: the exploited primitive here is auto-load,
+# not registration. Anchors: Codex CLI CVE-2025-61260 (CVSS 9.8), Claude Code
+# CVE-2025-59536 (CVSS 8.7), Cursor CVE-2025-54136 (MCPoison — approved config
+# mutated after the fact).
+AUTOLOAD_FILE_PATTERN = r"(?i)(\.cursorrules|\.clinerules|claude\.md|agents\.md|copilot-instructions|\.mcp\.json|mcp\.json|devcontainer\.json|\.vscode/settings\.json|\.windsurfrules|project (config|configuration) file|workspace (config|configuration|settings) file|repo(sitory)? (config|configuration) file)"
+AUTOLOAD_TRIGGER_PATTERN = r"(?i)(automatically (read|load|appl\w+|pick(s|ed)? up)|auto[- ]?load\w*|on (startup|launch|open(ing)?)|when (you )?open\w* (the )?(repo\w*|project|workspace|folder|directory)|at session start|without (asking|prompting|confirmation)|read\w* .{0,30}from the (repo\w*|project|workspace) root)"
+AUTOLOAD_TRUST_GATE_PATTERN = r"(?i)(trust (dialog|prompt|decision|check)|workspace trust|confirm\w* before (load|read|appl)\w*|ask the user before (load|read|appl)\w*|human (approval|confirmation) before (load|read|appl)\w*|only after (the user|explicit) (approv\w+|confirm\w+)|re-?verif\w+ .{0,20}(config|file) .{0,20}(change|modif))"
 
 SANDBOX_GATE_PATTERN = r"(?i)(allow[- ]?list|whitelist|auto[- ]?approv\w*|pre[- ]?approved|safe commands?|trusted commands?|deny[- ]?list|blocklist|forbidden commands?|dangerous commands?)"
 SANDBOX_BYPASS_AWARE_PATTERN = r"(?i)(obfuscat\w*|normali[sz]\w*|canonicali[sz]\w*|shell built[- ]?ins?|argument injection|quote stripping)"
@@ -318,6 +329,32 @@ def scan(text):
                 "detail": "Tool poisoning injects instructions through the tool schema itself, not just the tool output.",
                 "fix": "State explicitly that tool descriptions and tool results carry no authority over the agent's instructions. (Checklist #24, #5)",
             })
+
+
+    autoload_file_lines = find_lines(text, AUTOLOAD_FILE_PATTERN)
+    autoload_trigger_lines = find_lines(text, AUTOLOAD_TRIGGER_PATTERN)
+    for pattern in ARABIC_AUTOLOAD_PATTERNS:
+        autoload_trigger_lines.extend(find_lines(normalized_ar, pattern))
+    if autoload_file_lines and autoload_trigger_lines:
+        trust_gate_lines = find_lines(text, AUTOLOAD_TRUST_GATE_PATTERN)
+        if not trust_gate_lines:
+            hit_lines = sorted(set(autoload_file_lines + autoload_trigger_lines))
+            if has_exec:
+                findings.append({
+                    "id": "PI-AUTOLOAD-CONFIG", "severity": "Critical",
+                    "title": "Workspace configuration is auto-loaded before any trust decision, and the agent can execute",
+                    "lines": hit_lines,
+                    "detail": "A configuration file read from the workspace is a launcher definition, not passive metadata. Loading it before a trust decision means opening a repository is enough to run attacker-chosen code (Codex CLI, CVE-2025-61260, CVSS 9.8; Claude Code startup trust dialog, CVE-2025-59536, CVSS 8.7). Cursor CVE-2025-54136 (MCPoison) shows the config can also be mutated after approval.",
+                    "fix": "Require an explicit trust decision before any workspace config is read, and re-verify on every change to that file - approval of one version is not approval of the next. (Checklist #28, #24, #10)",
+                })
+            else:
+                findings.append({
+                    "id": "PI-AUTOLOAD-CONFIG", "severity": "High",
+                    "title": "Workspace configuration is auto-loaded with no stated trust decision",
+                    "lines": hit_lines,
+                    "detail": "Instructions read from a repository-controlled file inherit the authority of the agent's own configuration unless something states otherwise. An attacker who can land a file in the workspace can steer the agent without any execution primitive.",
+                    "fix": "Gate the read on an explicit trust decision, and treat the file's contents as untrusted data rather than as configuration. (Checklist #28, #5)",
+                })
 
     if has_exec:
         gate_lines = find_lines(text, SANDBOX_GATE_PATTERN)
