@@ -47,7 +47,7 @@ Also record the agent's **runtime surface**, since the 2026 rule families key of
 python scripts/pi_scan.py <target-file> [--json report.json] [--md report.md]
 ```
 
-The scanner checks 15 rule IDs across two groups (full index: `references/rule-inventory.md`):
+The scanner checks 16 rule IDs across two groups (full index: `references/rule-inventory.md`):
 
 - **Prompt-level classes** — missing instruction hierarchy, secret-like strings, leak-prone phrasing, missing output constraints, untrusted-content handling gaps, declared powerful capabilities.
 - **2026 agent-runtime classes** — `PI-MCP` (agent can add/register MCP tool servers), `PI-SANDBOX-BYPASS` (string-based command gates, sandbox trust keyed off agent-chosen paths), `PI-MEMORY` (persistent memory written with no integrity or provenance rule), `PI-SUPPLY-CHAIN` (agent installs packages it names itself), PI-AUTOLOAD-CONFIG (workspace configuration read before any trust decision). English and Arabic detection; see `references/attack-patterns-2026.md`.
@@ -136,7 +136,7 @@ All suites run with `python -m unittest tests.<module>`. Run the full set after 
 ### references/
 - `attack-patterns.md` — Catalog of prompt-injection techniques (direct, indirect, encoding, exfiltration, multi-agent) with real-world examples. Read during Step 3.
 - `attack-patterns-2026.md` — The 2026 agent-runtime families (MCP tool poisoning, sandbox/allowlist bypass, persistent memory injection, slopsquatting) with verified CVE anchors. Read when auditing agents with tools, sandboxes, memory, or package installs.
-- `rule-inventory.md` — Index of all 15 scanner rule IDs with severity behavior and checklist mapping. Consult when reporting findings or adding rules.
+- `rule-inventory.md` — Index of all 16 scanner rule IDs with severity behavior and checklist mapping. Consult when reporting findings or adding rules.
 - `defense-checklist.md` — 27 numbered hardening measures; each item maps to a finding class. Read during Step 5.
 - `defense-architecture.md` — The 5-layer defense design behind pi_shield, usage patterns, and honest limits of prompt-level filtering. Read when implementing input protection.
 - `test-payloads.md` — Organized payload suite for authorized live testing, ordered by escalation. Read during Step 4.

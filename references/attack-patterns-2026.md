@@ -8,6 +8,7 @@ The original `attack-patterns.md` catalog covers prompt-level injection. In 2026
 - [2. Sandbox / allowlist bypass (PI-SANDBOX-BYPASS)](#2-sandbox--allowlist-bypass-pi-sandbox-bypass)
 - [3. Persistent memory injection (PI-MEMORY)](#3-persistent-memory-injection-pi-memory)
 - [4. Supply-chain slopsquatting (PI-SUPPLY-CHAIN)](#4-supply-chain-slopsquatting-pi-supply-chain)
+- [5. Repo-borne configuration auto-load (PI-AUTOLOAD-CONFIG)](#5-repo-borne-configuration-auto-load-pi-autoload-config)
 
 ## 1. MCP tool-server exposure (PI-MCP)
 
@@ -22,6 +23,8 @@ Documented anchors:
 Scanner logic: MCP surface present → Medium; agent can register/connect servers → High; mutable **and** (execution capability or unsafe stdio/serialization) → Critical.
 
 Defenses: pinned allowlist of known servers, human confirmation before any server add, tool metadata treated as data with no authority (Checklist #5, #9, #10).
+
+Note: CVE-2026-12957 and CVE-2025-61260 also appear in section 5. In this section the exploited primitive is *registration* — the agent is permitted to add a tool server. In section 5 it is *auto-load* — the agent reads a file out of the workspace before any trust decision is made. The same CVE can demonstrate both, and the two need different fixes.
 
 ## 2. Sandbox / allowlist bypass (PI-SANDBOX-BYPASS)
 
@@ -60,3 +63,45 @@ Defenses: never install a model-produced identifier; pin names, verify against l
 ---
 
 *Every CVE above was verified against NVD/GitHub advisories/CERT at the time of writing. Scores are CVSS 3.1 unless noted (DuneSlide: 9.3 on CVSS 4.0). Static rules find leads, not verdicts — confirm each finding manually.*
+
+## 5. Repo-borne configuration auto-load (PI-AUTOLOAD-CONFIG)
+
+A configuration file read out of the workspace is not passive metadata. Files
+like `.cursorrules`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and devcontainer
+definitions carry instructions, tool definitions or launcher commands, and they
+live wherever the user happens to open a folder. Whoever can write to the
+repository can therefore write to the agent's configuration. When the agent
+reads them at startup, opening a repository is the whole exploit — no click, no
+prompt, no user error.
+
+This differs from tool-server registration (section 1) in what it grants and in
+how it is fixed. Registration asks whether the agent may add a server; auto-load
+asks whether the agent reads workspace-controlled instructions before deciding
+to trust that workspace. An agent with no MCP surface at all is still exposed if
+it picks up `AGENTS.md` from an untrusted clone.
+
+Documented anchors:
+
+- CVE-2025-61260 — Codex CLI (CVSS 9.8). Running the CLI inside a malicious
+  repository auto-loaded project-local `.env` and `.codex/config.toml`,
+  executing embedded configuration commands immediately on startup.
+- CVE-2025-59536 — Claude Code (CVSS 8.7), fixed in 1.0.111. Code injection
+  through the startup trust dialog: the mechanism meant to gate workspace trust
+  was itself reachable before the decision was made.
+- CVE-2025-54136 — Cursor "MCPoison". An MCP configuration approved once was
+  silently modified afterwards and re-executed without re-prompting. Approval of
+  one version of a config file is not approval of the next.
+- CVE-2026-12957 — Amazon Q Developer. Auto-loaded `.amazonq/mcp.json` from any
+  opened repository with full environment inheritance and no consent check.
+
+Scanner logic: a workspace configuration file **and** an auto-load trigger, with
+no stated trust decision → High; the same combination with a declared execution
+capability → Critical. A stated trust gate — a trust dialog, explicit user
+confirmation before reading, or re-verification when the file changes —
+suppresses the finding. Either signal alone is not flagged: naming `CLAUDE.md`
+is not a weakness, and auto-loading user preferences is not either.
+
+Defenses: gate every workspace-config read on an explicit trust decision,
+re-verify on each change to the file, and where the file only needs to inform
+rather than instruct, load it as data under the same delimiting rules as any
+other untrusted content (Checklist #28, #24, #5, #10).
