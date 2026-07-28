@@ -113,16 +113,16 @@ Run the full test suite with `python -m unittest discover tests`.
 
 ### New in v2.2 — 2026 agent-runtime rules (scanner)
 
-pi_scan now detects the four weakness families that dominated 2026 incidents, in English **and Arabic** (`references/attack-patterns-2026.md`):
+pi_scan now detects the five weakness families that dominated 2026 incidents, in English **and Arabic** (`references/attack-patterns-2026.md`):
 
 - **PI-MCP** — agent can add/register MCP tool servers (Medium/High/Critical tiers; Flowise CVE-2026-40933, Amazon Q CVE-2026-12957). Fix: checklist #24.
 - **PI-SANDBOX-BYPASS** — string-based command gates with no obfuscation defense, sandbox trust keyed off agent-chosen paths (Codex CLI CVE-2025-59532, MS-Agent CVE-2026-2256, Cursor DuneSlide CVE-2026-50548/50549). Fix: checklist #25.
 - **PI-MEMORY** — persistent memory written with no integrity or provenance rule. Fix: checklist #26.
 - **PI-SUPPLY-CHAIN** — agent installs packages it names itself ("slopsquatting"). Fix: checklist #27.
 
-Repo-borne config auto-load (Codex CLI CVE-2025-61260, Claude Code CVE-2025-59536, Cursor CVE-2025-54136) is scored under **PI-MCP** rather than as a separate rule, because the exploited primitive is the same: a configuration file treated as a launcher before any trust decision.
-
+- PI-AUTOLOAD-CONFIG - workspace configuration auto-loaded before any trust decision (Codex CLI CVE-2025-61260, Claude Code CVE-2025-59536, Cursor CVE-2025-54136 / MCPoison). High by default, Critical when the agent can also execute. Fix: checklist #28.
 19-case suite: `python -m unittest tests.test_runtime_rules`.
+  8-case suite: python -m unittest tests.test_autoload_rule
 
 ### New in v2.2 — mcp_guard (MCP tool-response guard)
 
