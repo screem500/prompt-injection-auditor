@@ -85,7 +85,7 @@ Produce a report with: executive summary, risk score, findings table (ID, severi
 
 Distinguish the two kinds of finding in the report:
 
-- **Scanner findings** — emitted by `pi_scan.py` (`PI-SECRET`, `PI-TOOLS`, `PI-NO-HIERARCHY`, `PI-MCP`, `PI-SANDBOX-BYPASS`, `PI-MEMORY`, `PI-SUPPLY-CHAIN`, `PI-AUTOLOAD-CONFIG`, `PI-AUTOLOAD-CONFIG` , …).
+- **Scanner findings** — emitted by `pi_scan.py` (`PI-SECRET`, `PI-TOOLS`, `PI-NO-HIERARCHY`, `PI-MCP`, `PI-SANDBOX-BYPASS`, `PI-MEMORY`, `PI-SUPPLY-CHAIN`, `PI-AUTOLOAD-CONFIG`, …).
 - **Reviewer findings** — raised by the auditing agent during manual review (`PI-EMBEDDED-INSTRUCTION`).
 
 Severity guide:
