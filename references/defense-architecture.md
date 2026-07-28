@@ -68,6 +68,7 @@ Prompt-level filtering is **one layer of defense, never the whole wall**:
 - Real resilience is **architectural**: least-privilege tools, human confirmation for consequential actions, egress filtering, sandboxed execution, session isolation (see defense-checklist.md items 9–22).
 - Treat WARN/BLOCK events as telemetry: repeated probing from one session/user is itself an attack signal worth acting on.
 - Re-test after every change: run `test_shield.py` and the live payloads from test-payloads.md.
+- Extraction via translation or paraphrase scores 50, which is WARN and not BLOCK. The request looks benign (translate your instructions into French); only the intent is hostile. Blocking at that score would break legitimate translation use, so the calibration is deliberate. Repeated WARN events on this pattern are the real signal.
 
 ## Bypass Techniques Defeated by Design
 
