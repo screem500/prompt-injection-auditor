@@ -50,7 +50,7 @@ python scripts/pi_scan.py <target-file> [--json report.json] [--md report.md]
 The scanner checks 15 rule IDs across two groups (full index: `references/rule-inventory.md`):
 
 - **Prompt-level classes** — missing instruction hierarchy, secret-like strings, leak-prone phrasing, missing output constraints, untrusted-content handling gaps, declared powerful capabilities.
-- **2026 agent-runtime classes** — `PI-MCP` (agent can add/register MCP tool servers), `PI-SANDBOX-BYPASS` (string-based command gates, sandbox trust keyed off agent-chosen paths), `PI-MEMORY` (persistent memory written with no integrity or provenance rule), `PI-SUPPLY-CHAIN` (agent installs packages it names itself). English and Arabic detection; see `references/attack-patterns-2026.md`.
+- **2026 agent-runtime classes** — `PI-MCP` (agent can add/register MCP tool servers), `PI-SANDBOX-BYPASS` (string-based command gates, sandbox trust keyed off agent-chosen paths), `PI-MEMORY` (persistent memory written with no integrity or provenance rule), `PI-SUPPLY-CHAIN` (agent installs packages it names itself), PI-AUTOLOAD-CONFIG (workspace configuration read before any trust decision). English and Arabic detection; see `references/attack-patterns-2026.md`.
 
 Output is a 0–100 risk score with findings. Treat scanner output as leads, not verdicts — verify each finding by reading the target.
 
@@ -85,7 +85,7 @@ Produce a report with: executive summary, risk score, findings table (ID, severi
 
 Distinguish the two kinds of finding in the report:
 
-- **Scanner findings** — emitted by `pi_scan.py` (`PI-SECRET`, `PI-TOOLS`, `PI-NO-HIERARCHY`, `PI-MCP`, `PI-SANDBOX-BYPASS`, `PI-MEMORY`, `PI-SUPPLY-CHAIN`, …).
+- **Scanner findings** — emitted by `pi_scan.py` (`PI-SECRET`, `PI-TOOLS`, `PI-NO-HIERARCHY`, `PI-MCP`, `PI-SANDBOX-BYPASS`, `PI-MEMORY`, `PI-SUPPLY-CHAIN`, `PI-AUTOLOAD-CONFIG` , …).
 - **Reviewer findings** — raised by the auditing agent during manual review (`PI-EMBEDDED-INSTRUCTION`).
 
 Severity guide:
@@ -94,6 +94,7 @@ Severity guide:
 - Secrets or keys present in the prompt (checklist #6)
 - Agent can send data out AND ingests untrusted content — EchoLeak-class (checklist #9, #10, #11)
 - `PI-MCP` at execution tier: agent can register or execute MCP tool servers (checklist #24)
+- `PI-AUTOLOAD-CONFIG` with a declared execution capability: opening a repository is enough to run attacker-chosen code (checklist #28)
 - `PI-EMBEDDED-INSTRUCTION`: embedded instructions in the target attempting to alter audit scope or methodology (checklist #23)
 
 **High**
@@ -102,6 +103,7 @@ Severity guide:
 - `PI-SANDBOX-BYPASS`: command gate with no obfuscation defense, or sandbox boundary derived from an agent-chosen path (checklist #25)
 - `PI-MEMORY`: memory writes under untrusted ingestion (checklist #26)
 - `PI-SUPPLY-CHAIN`: agent installs model-named packages (checklist #27)
+- `PI-AUTOLOAD-CONFIG`: workspace configuration auto-loaded with no stated trust decision (checklist #28)
 
 **Medium**
 - Persona override succeeds; missing output constraints; weak refusal behavior (checklist #1, #3, #4, #7)
@@ -114,7 +116,7 @@ Severity guide:
 ## Resources
 
 ### scripts/
-- `pi_scan.py` — Static analyzer for system prompts and instruction files. No dependencies; Python 3.8+. Covers the prompt-level classes and the 2026 agent-runtime classes (`PI-MCP`, `PI-SANDBOX-BYPASS`, `PI-MEMORY`, `PI-SUPPLY-CHAIN`), English and Arabic. Outputs findings with line numbers, risk score, and optional JSON/Markdown reports.
+- `pi_scan.py` — Static analyzer for system prompts and instruction files. No dependencies; Python 3.8+. Covers the prompt-level classes and the 2026 agent-runtime classes (`PI-MCP`, `PI-SANDBOX-BYPASS`, `PI-MEMORY`, `PI-SUPPLY-CHAIN`, `PI-AUTOLOAD-CONFIG`), English and Arabic. Outputs findings with line numbers, risk score, and optional JSON/Markdown reports.
 - `pi_shield.py` — Layered prompt-injection *defense* (v2.0): normalization, safe delimiting with closing-tag neutralization, scored detection, encoded-payload inspection, canary output check. Use when the user wants to add input protection to an agent, not just audit it.
 - `mcp_guard.py` — MCP tool-response guard (v2.2): scans tool responses (JSON-aware, JSON-path findings) and tool definitions for indirect injection — special tokens, fake consent, tool-call manipulation, exfiltration channels, hidden channels, encoded and Arabic payloads. Use when auditing or hardening agents that ingest tool output.
 - `normalization.py` — Arabic normalization (v2.1): diacritics, tatweel, letter forms. Used by pi_scan, pi_shield and mcp_guard.
