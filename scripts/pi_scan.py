@@ -85,6 +85,26 @@ SECRET_PATTERNS = [
     (r"(?i)(api[\s_-]?key|secret|token|password)\s*[:=]\s*['\"]?[a-zA-Z0-9\-_/+.]{16,}", "Hardcoded credential-like value"),
 ]
 
+# Values that look like credentials but are placeholders or environment
+# references. On real-world instruction files these caused every observed
+# PI-SECRET false positive (0/9 precision on the 2026-08 study corpus), so
+# matches in these contexts are suppressed for all secret patterns.
+SECRET_PLACEHOLDER_PATTERN = (
+    r"(?i)(process\.env|os\.environ|import\.meta\.env|system\.getenv|getenv\(|"
+    r"\benv\[|\$\{|\byour[_ -]|_here\b|placeholder|example|dummy|changeme|"
+    r"replace[_ -]?me|redacted|x{4,}|<[a-z][a-z_ ]*>|\bwrong\b|"
+    r"\b(data|res|config|settings|options|req|resp)\.[a-z]|localstorage|sessionstorage|getitem|importlib|import_module|require\(|import\(|module\()"
+)
+
+# Dummy values that name themselves: the value still contains the keyword
+# (e.g. "Password: WrongPassword123", "secret: BEE_CLIENT_SECRET"). Applied
+# only to the generic credential pattern; a value that spells out its own
+# keyword is a placeholder far more often than a live credential.
+SECRET_SELF_DESCRIBING_PATTERN = (
+    r"(?i)(api[\s_-]?key|secret|token|password)\s*[:=]\s*['\"]?"
+    r"[a-z0-9\-_/+.]{0,40}(password|secret|token|api[\s_-]?key)"
+)
+
 HIERARCHY_PATTERNS = [
     r"(?i)(system |these |this |the )?(instructions?|rules?|configuration|prompt|directives?|policy) (outranks?|overrides?|takes? precedence|has priority|have priority|rank above|come first)",
     r"(?i)(outranks?|overrides?|takes? precedence over|ranks? above|come[s]? first)\b",
@@ -242,7 +262,10 @@ def scan(text):
     normalized_ar = normalize_arabic(text).lower()
 
     for pattern, label in SECRET_PATTERNS:
-        lines = find_lines(text, pattern)
+        skip = [SECRET_PLACEHOLDER_PATTERN]
+        if label == "Hardcoded credential-like value":
+            skip.append(SECRET_SELF_DESCRIBING_PATTERN)
+        lines = find_lines(text, pattern, skip_context_patterns=skip)
         if lines:
             findings.append({
                 "id": "PI-SECRET", "severity": "Critical",
