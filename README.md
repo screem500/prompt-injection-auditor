@@ -11,6 +11,8 @@ Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open [Agen
 
 **Measured:** separation between hardened and vulnerable prompts improved from 8.3 to 40.6 points, with zero false positives on the hardened corpus. See [VALIDATION.md](VALIDATION.md).
 
+**Different target:** payload detectors ask "is this input an attack?"; this asks "does your prompt have the controls to blunt one?" Both use patterns — but a missing instruction hierarchy is missing regardless of how an attacker phrases the attempt.
+
 ![live demo](demo-prompt-injection-auditor.gif)
 
 ## Why?
