@@ -191,6 +191,25 @@ TOOL_RISK_KEYWORDS = [
     (r"(?i)(http[s]? request|api call|fetch|browse|webhook)", "Network/egress capability"),
     (r"(?i)(read|access|retrieve) .{0,30}(file|document|email|drive|database)", "Sensitive data access"),
 ]
+# App-description and development contexts where capability keywords describe
+# the software being built (or its business), not the agent's own privileges.
+# Derived from the 2026-08 study corpus: 97 of 256 cursorrules files fired
+# PI-TOOLS almost entirely on code snippets, CLI references and dev vocabulary.
+TOOL_APP_CONTEXT_PATTERNS = [
+    # code snippets: fetch('...'), axios, curl, URLs, localhost, assignments
+    r"(?i)(fetch\s*\(|axios|curl\s|http[s]?://|localhost|127\.0\.0\.1|await |const |\.get\(|\.post\()",
+    # CLI reference docs: "ankra delete cluster <name>", angle-bracket args
+    r"(?i)(delete|remove|drop|truncate)\w*\s+<[a-z]|<(name|id|path|file|cluster|token|stack)s?>",
+    # software-domain vocabulary colliding with capability words
+    r"(?i)(data transfer|transfer object|\bdto\b|git checkout|checkout\s+(-b|branch|the branch))",
+    # business/product description, not agent privileges
+    r"(?i)(revenue|subscription|pricing|monetiz|business model|payment (integration|gateway|provider|method)|stripe|paywall)",
+    # third-person app features: the app's users act, not the agent
+    r"(?i)((enable|allow|let)s? (the )?users? (to|can)|users? (can|may|will) (send|purchase|pay|delete|upload))",
+    # dev workflow commands
+    r"(?i)(run|execute)\w*\s+(the\s+)?(tests?|npm|pnpm|yarn|build|lint|migration|seed|docker)",
+]
+
 INGEST_KEYWORDS = [
     r"(?i)(retrieve|fetch|read|summarize|ingest|scrape).{0,40}(web ?page|url|website|internet)",
     r"(?i)(email|inbox|message)s? (you receive|from users|retrieved)",
@@ -310,7 +329,7 @@ def scan(text):
     tool_hits = []
     ingest_lines = []
     for pattern, label in TOOL_RISK_KEYWORDS:
-        lines = find_lines(text, pattern, TOOL_NEGATION_CONTEXT)
+        lines = find_lines(text, pattern, TOOL_NEGATION_CONTEXT + TOOL_APP_CONTEXT_PATTERNS)
         if lines:
             tool_hits.append((label, lines))
     for pattern, label in ARABIC_TOOL_RISK_KEYWORDS:
