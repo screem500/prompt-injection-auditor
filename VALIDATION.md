@@ -105,6 +105,74 @@ After excluding surface rules, **no false positive remains** across the
 hardened corpus: 8 of 8 files rate HARDENED, and the three remaining findings
 are all `PI-INGEST` on agents that genuinely ingest untrusted content.
 
+## External corpus: the shield against real-world jailbreaks
+
+The measurements above use a corpus written by the same people who wrote the
+rules, which is the weakest position from which to claim anything. This
+section uses an external one.
+
+**Corpus:** `garak` in-the-wild jailbreak corpus, 650 prompts, 100%
+malicious. Obtained from the Agent Threat Rules repository at
+`data/test-corpora/garak-full/inthewild.json`.
+SHA-256 `c072aa0903c4ea4687020131a2e898443ca415b57120107431fa0c3d9471f8a9`.
+
+**Target:** `pi_shield.py` — the runtime input guard. Not `pi_scan.py`: this
+corpus is attacker payloads, and the scanner audits a defender's prompt. The
+two are measured against different things.
+
+### Results
+
+| Decision | Count | Share |
+|----------|------:|------:|
+| BLOCK — rejected before the model sees it | 102 | 15.7% |
+| WARN — passed sanitised, logged for monitoring | 134 | 20.6% |
+| ALLOW — not flagged at all | 414 | 63.7% |
+
+Hard-stop recall (BLOCK only): **15.7%**
+Noticed at all (BLOCK + WARN): **36.3%**
+Mean threat score: 25.1 / 100
+
+Reproduced independently on two machines with identical results.
+
+### Reading the number honestly
+
+This is a low number and it is published as measured.
+
+**What the shield catches.** The 102 blocks come from its written families:
+jailbreak attempts, persona hijacking, instruction override. The patterns
+work when the phrasing lands inside them.
+
+**What it misses.** The bulk of the 414 that passed are long role-play
+jailbreaks — the DAN family and its descendants — phrased outside the
+specific constructions the shield encodes. This is a coverage gap, not an
+implementation bug: no pattern in the shield was written to match them.
+
+**Context, not excuse.** Agent Threat Rules (ATR 3.5.8, measured
+2026-07-13) — a 768-rule detection standard listed as a production
+deployment at Microsoft and Cisco (ADOPTERS.md, Tier 1) — reports 95.7%
+recall on this same corpus (down from 98.0% in earlier versions, per its
+own changelog), 38.3% on the full garak probe set (3.5.0, 2026-06-16), and
+2.1% on AdvBench, a corpus that tests model alignment rather than
+injection. Their own conclusion applies here: a regex layer catches
+structured attack shapes and misses paraphrase. A single shield is a layer,
+not a solution. ATR's figures move between versions; they are cited here
+with their version and measurement date for that reason.
+
+**What this does not change.** The shield is one of three components here.
+The scanner's job — auditing a defender's prompt for missing controls — is
+measured separately above and is unaffected by this number. If anything, a
+payload detector stopping 15.7% of real jailbreaks is the argument for
+checking your controls before deployment rather than relying on runtime
+filtering alone.
+
+### Deliberately not tuned to this corpus
+
+Adding DAN-family patterns would raise this number quickly and would mean
+nothing: the corpus is public and fixed, so fitting to it measures
+memorisation, not detection. If the shield's coverage is extended, the
+change will be documented as its own entry and re-measured against a corpus
+that was not used to design it.
+
 ## Limits
 
 - **Precision, not recall.** The corpus is synthetic and written by the same
