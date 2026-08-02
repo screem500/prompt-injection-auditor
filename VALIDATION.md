@@ -172,6 +172,46 @@ nothing: the corpus is public and fixed, so fitting to it measures
 memorisation, not detection. If the shield's coverage is extended, the
 change will be documented as its own entry and re-measured against a corpus
 that was not used to design it.
+## Score floor and calibration (measured 2026-08-03, scanner v2.3.2 frozen at sha256 93dc6ef7)
+
+The risk score has a **structural floor**, measured directly on the frozen scanner:
+
+| Probe text | Score | What fires |
+|---|---|---|
+| Empty file | 63/100 | All six `PI-NO-*` absence rules |
+| `You are a helpful assistant.` | 63/100 | Same |
+| A paragraph of ordinary coding rules | 63/100 | Same |
+| A prompt declaring all six controls | 11/100 → HARDENED | Two rules miss the phrasing |
+| Same, plus tool declarations | 46/100 | `PI-TOOLS` adds +35 |
+
+The floor is exact arithmetic: `PI-NO-HIERARCHY` (18) + `PI-NO-NONDISCLOSE` (18)
++ `PI-NO-ROLEGUARD` (8) + `PI-NO-OUTPUTLIM` (8) + `PI-NO-DELIMIT` (8) +
+`PI-NO-REFUSAL` (3) = **63**. Any text that does not explicitly declare these
+six controls scores at least 63, because the absence rules fire by default.
+
+**What this means.**
+
+- The score measures **declared controls**, not actual safety. This is the
+  tool's stated thesis ("a missing instruction hierarchy is missing regardless
+  of how an attacker phrases the attempt"), and it is why the hardened
+  benchmark texts score near 0: they declare the controls in recognizable
+  phrasing, so the rules stay silent. Static analysis cannot prove safety;
+  it can only verify that defenses were declared.
+- For the tool's intended target — **your own production agent prompt, audited
+  before deployment** — the absolute score stands: a prompt that declares
+  nothing is, in fact, undefended, and 63 ("HIGH RISK") is the correct verdict
+  for shipping `You are a helpful assistant.` as an agent's system prompt.
+- For **corpus statistics over mixed file types** (skills, coding rules,
+  templates, agent prompts), the absolute score compresses: the meaningful
+  signal is the *distance from the floor* — which controls a file declares
+  (each one subtracts its weight) and which dangerous capabilities it adds
+  (each presence finding adds weight). Corpus results are therefore reported
+  as **control-declaration rates**, with verdict-band percentages as secondary
+  figures carrying this calibration note.
+
+This is documented as a measurement property, not fixed: the scanner did not
+change (sha256 above), per the freeze rule in PREREGISTRATION.md.
+
 
 ## Limits
 
