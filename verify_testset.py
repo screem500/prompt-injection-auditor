@@ -33,7 +33,7 @@ SCANNER_FILES = ["pi_scan.py", "language_rules.py", "normalization.py", "rule_do
 MIN_CHARS = 200
 
 EXPECTED = {
-    "files": 2491, "mean": 73.2, "median": 71, "band90": 499,
+    "files": 2491, "mean": 73.2, "median": 71, "severe": 1362, "hardened": 0,
     "sources": {"copilot": 824, "subagents": 183, "gpt-prompts": 1386, "prompt-library": 98},
 }
 
@@ -122,10 +122,23 @@ if not (ok_hashes and ok_counts):
 print("\n== 3/4  fetching the frozen scanner (pinned commit) ==")
 sdir = BUILD / "scanner"
 sdir.mkdir(exist_ok=True)
-for f in SCANNER_FILES:
-    (sdir / f).write_text(
-        fetch(f"https://raw.githubusercontent.com/{REPO}/{FROZEN_COMMIT}/scripts/{f}"),
-        encoding="utf-8")
+local = Path.home() / "pia-work" / "scripts"
+if (local / "pi_scan.py").exists() and \
+   hashlib.sha256((local / "pi_scan.py").read_bytes()).hexdigest() == SCANNER_SHA256:
+    for f in SCANNER_FILES:  # local clone already carries the frozen commit
+        (sdir / f).write_bytes((local / f).read_bytes())
+    print(f"  using local clone {local} (hash-verified)")
+else:
+    import base64 as b64mod
+    for f in SCANNER_FILES:
+        try:
+            (sdir / f).write_text(
+                fetch(f"https://raw.githubusercontent.com/{REPO}/{FROZEN_COMMIT}/scripts/{f}"),
+                encoding="utf-8")
+        except Exception:  # some networks 404 raw-at-SHA; the API path serves it
+            meta = json.loads(fetch(
+                f"https://api.github.com/repos/{REPO}/contents/scripts/{f}?ref={FROZEN_COMMIT}"))
+            (sdir / f).write_bytes(b64mod.b64decode(meta["content"]))
 actual = hashlib.sha256((sdir / "pi_scan.py").read_bytes()).hexdigest()
 print(f"  pi_scan.py sha256 = {actual}")
 if actual != SCANNER_SHA256:
@@ -149,22 +162,31 @@ for p in sorted(corpus.iterdir()):
         rule_hits[f["id"]] += 1
 
 n = len(scores)
-hard = sum(1 for s in scores if s >= 90)
+severe = sum(1 for s in scores if s >= 70)   # the scanner's own verdict bands:
+high = sum(1 for s in scores if 40 <= s < 70)  # >=70 SEVERELY EXPOSED,
+moderate = sum(1 for s in scores if 15 <= s < 40)  # 40-69 HIGH RISK,
+hardened = sum(1 for s in scores if s < 15)  # 15-39 MODERATE, <15 HARDENED
 mean = statistics.mean(scores)
 median = statistics.median(scores)
 print(f"\nfiles scanned: {n}")
-print(f"risk score: mean {mean:.1f} | median {median:.0f} | min {min(scores)} | max {max(scores)}")
-print(f"hardened (>=90): {hard} ({hard/n*100:.1f}%)")
-print("\nby source (n / mean):")
+print(f"RISK score: mean {mean:.1f} | median {median:.0f} | min {min(scores)} | max {max(scores)}")
+print("verdict bands (the scanner's own):")
+print(f"  SEVERELY EXPOSED (>=70): {severe} ({severe/n*100:.1f}%)")
+print(f"  HIGH RISK (40-69):       {high} ({high/n*100:.1f}%)")
+print(f"  MODERATE (15-39):        {moderate} ({moderate/n*100:.1f}%)")
+print(f"  HARDENED (<15):          {hardened} ({hardened/n*100:.1f}%)")
+print("\nby source (n / mean RISK / % severe):")
 for s, vals in sorted(by_source.items()):
-    print(f"  {s:<15} n={len(vals):4d}  mean {statistics.mean(vals):5.1f}")
+    sv = sum(1 for v in vals if v >= 70)
+    print(f"  {s:<15} n={len(vals):4d}  mean {statistics.mean(vals):5.1f}  severe {sv/len(vals)*100:5.1f}%")
 
 print("\n== verdict ==")
 checks = [
     ("files == 2491", n == EXPECTED["files"]),
     ("mean == 73.2", round(mean, 1) == EXPECTED["mean"]),
     ("median == 71", median == EXPECTED["median"]),
-    ("hardened == 499", hard == EXPECTED["band90"]),
+    ("severe == 1362", severe == EXPECTED["severe"]),
+    ("hardened == 0", hardened == EXPECTED["hardened"]),
 ]
 for label, ok in checks:
     print(f"  [{'OK ' if ok else 'FAIL'}] {label}")
