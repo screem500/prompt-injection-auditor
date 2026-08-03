@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.5.1 — 2026-08-03
+
+### Fixed — PI-ANSI-INJECT was blind to carriage returns through the CLI
+
+Python's universal-newline file reading translates `\r` to `\n` before
+`scan()` ever sees the text, so v2.5.0 flagged stray-CR overwrites when the
+scanner was used as a library but silently missed them through the actual
+command line — the primary usage. `pi_scan` and `pi_shield` now read files
+with `newline=""` and reconfigure stdin the same way. Guarded by a CLI-level
+regression test that writes a real `\r` file and drives the real entry point
+via subprocess (115 tests). Found while preparing the feature's demo —
+exactly the kind of gap a demo run exists to catch.
+
 ## v2.5.0 — 2026-08-03
 
 New rule **PI-ANSI-INJECT** (17 rule IDs) plus a matching `pi_shield`

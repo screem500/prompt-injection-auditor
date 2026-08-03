@@ -236,9 +236,15 @@ def check_output(model_output, canaries):
 
 def _main():
     if len(sys.argv) > 1:
-        with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as fh:
+        # newline="": carriage returns are attack signals (line overwrite);
+        # do not let universal-newline translation erase them before Layer 1.
+        with open(sys.argv[1], "r", encoding="utf-8", errors="replace", newline="") as fh:
             text = fh.read()
     else:
+        try:
+            sys.stdin.reconfigure(newline="")
+        except (AttributeError, ValueError):
+            pass  # stdin replaced by a non-TextIOWrapper (tests, embeddings)
         text = sys.stdin.read()
 
     if not text.strip():

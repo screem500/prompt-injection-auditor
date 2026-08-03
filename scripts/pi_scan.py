@@ -702,7 +702,10 @@ def main():
     args = parser.parse_args()
 
     try:
-        with open(args.target, "r", encoding="utf-8", errors="replace") as file_handle:
+        # newline="" disables universal-newline translation: a stray carriage
+        # return is itself an attack signal (line overwrite, PI-ANSI-INJECT)
+        # and must reach the scanner intact.
+        with open(args.target, "r", encoding="utf-8", errors="replace", newline="") as file_handle:
             text = file_handle.read()
     except OSError as error:
         print(f"error: cannot read {args.target}: {error}", file=sys.stderr)
