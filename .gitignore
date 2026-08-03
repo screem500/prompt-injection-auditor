@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 corpus-hardened/
 corpus-vulnerable/
+verify_build/
