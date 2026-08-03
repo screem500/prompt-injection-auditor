@@ -116,3 +116,38 @@ def suspicious_unicode_lines(text: str) -> List[int]:
         for index, line in enumerate(text.splitlines(), start=1)
         if any(_is_suspicious_invisible(char) for char in line)
     ]
+
+
+# --- Terminal control characters (v2.5.0, PI-ANSI-INJECT) --------------------
+
+# ESC starts every ANSI escape sequence; the C1 range includes single-byte CSI
+# (U+009B), OSC (U+009D) and DCS (U+0090), which VTE-based terminals, kitty and
+# WezTerm accept as equivalents of the two-byte ESC forms.
+_ANSI_ESCAPE_RE = re.compile("[\x1b\x80-\x9f]")
+
+# Remaining C0 controls (except tab, newline, carriage return) and DEL. Several
+# are display-active: VT/FF can clear or paginate the screen, BS erases drawn
+# characters, BEL terminates (and can smuggle) OSC payloads.
+_ANSI_OTHER_CONTROL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f\x7f]")
+
+
+def terminal_control_lines(text: str) -> dict:
+    """Locate raw terminal-control characters, grouped by attack class.
+
+    Splits on "\\n" only: str.splitlines() also splits on \\r, VT, FF, NEL and
+    the FS/GS/RS boundaries, which would silently consume exactly the bytes this
+    check exists to find (a carriage-return line-overwrite, for example). One
+    trailing "\\r" per line is ignored so ordinary CRLF files stay clean; any
+    other carriage return is a mid-line overwrite attempt.
+    """
+
+    hits = {"escape": [], "carriage_return": [], "other_control": []}
+    for index, line in enumerate(text.split("\n"), start=1):
+        body = line[:-1] if line.endswith("\r") else line
+        if _ANSI_ESCAPE_RE.search(body):
+            hits["escape"].append(index)
+        if "\r" in body:
+            hits["carriage_return"].append(index)
+        if _ANSI_OTHER_CONTROL_RE.search(body):
+            hits["other_control"].append(index)
+    return hits

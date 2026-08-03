@@ -2,7 +2,8 @@
 """pi_shield.py — Layered prompt-injection defense for LLM agents.
 
 Five layers:
-  1. Normalization   — unicode, zero-width, homoglyph cleanup
+  1. Normalization   — terminal-control neutralization, unicode, zero-width,
+                       homoglyph cleanup
   2. Safe delimiting — wraps input in tags AND neutralizes closing-tag escapes
   3. Scored detection — weighted pattern analysis (not blind keyword blocking)
   4. Encoded payload inspection — decodes base64/hex blobs and scans contents
@@ -39,9 +40,27 @@ HOMOGLYPHS = str.maketrans({
 })
 
 
+# Terminal escape/control characters are neutralized with VISIBLE placeholders
+# rather than deletion, so a reviewer (or the model) can still see that an
+# artifact was there — the same approach as Trail of Bits' PrintGuard. Only tab
+# and newline survive, matching terminal-security guidance (escape every
+# control character except tabs and newlines).
+ESCAPE_PLACEHOLDER = "␛"  # ␛ — one visible glyph per ESC byte
+CR_PLACEHOLDER = "␍"  # ␍ — stray carriage return (line-overwrite vector)
+CONTROL_PLACEHOLDER = chr(0xFFFD)  # replacement char — other control bytes
+
+_ANSI_C1_RE = re.compile("[\x80-\x9f]")  # C1 controls incl. single-byte CSI/OSC/DCS
+_ANSI_C0_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f\x7f]")  # keeps \t \n \r
+
+
 def normalize(text):
     """Layer 1: force text into a canonical, inert state."""
-    t = unicodedata.normalize("NFKC", text)
+    t = text.replace("\x1b", ESCAPE_PLACEHOLDER)  # ESC can start any ANSI sequence
+    t = _ANSI_C1_RE.sub(CONTROL_PLACEHOLDER, t)
+    t = t.replace("\r\n", "\n")  # judge CR only after CRLF is normalized
+    t = t.replace("\r", CR_PLACEHOLDER)
+    t = _ANSI_C0_RE.sub(CONTROL_PLACEHOLDER, t)
+    t = unicodedata.normalize("NFKC", t)
     for ch in ZERO_WIDTH + BIDI_CONTROLS:
         t = t.replace(ch, "")
     return t.translate(HOMOGLYPHS)
@@ -172,7 +191,7 @@ def shield_input(user_text, warn_at=30, block_at=60):
     # Layer 1: normalize
     norm = normalize(user_text)
     if norm != user_text:
-        notes.append("input contained hidden unicode (zero-width/homoglyph/bidi) — normalized")
+        notes.append("input contained terminal-control/hidden unicode characters — neutralized")
 
     # Layer 3 (raw text scoring, before wrapping)
     score, hits = score_patterns(norm)

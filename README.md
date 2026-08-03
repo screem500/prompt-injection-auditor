@@ -91,7 +91,7 @@ A hardened prompt (hierarchy + non-disclosure + delimiters) scores **0/100 — H
 prompt-injection-auditor/
 ├── SKILL.md                        # 5-step audit methodology + ethics guardrails (v2.2.0)
 ├── scripts/
-│   ├── pi_scan.py                  # Zero-dependency static analyzer (16 rule IDs — see references/rule-inventory.md)
+│   ├── pi_scan.py                  # Zero-dependency static analyzer (17 rule IDs — see references/rule-inventory.md)
 │   ├── pi_shield.py                # v2.0: layered input defense (5 layers, scored decisions)
 │   ├── mcp_guard.py                # v2.2: MCP tool-response guard (JSON-aware)
 │   ├── normalization.py            # v2.1: Arabic normalization (diacritics, tatweel, letters)
@@ -108,12 +108,19 @@ prompt-injection-auditor/
 └── references/
     ├── attack-patterns.md          # Direct / indirect / encoding / exfiltration / multi-agent
     ├── attack-patterns-2026.md     # MCP poisoning / sandbox bypass / memory injection / slopsquatting
-    ├── rule-inventory.md           # All 16 rule IDs: severity behavior + checklist mapping
-    ├── defense-checklist.md        # 27 numbered hardening measures
+    ├── rule-inventory.md           # All 17 rule IDs: severity behavior + checklist mapping
+    ├── defense-checklist.md        # 29 numbered hardening measures
     ├── defense-architecture.md     # The 5-layer shield design + honest limits
     └── test-payloads.md            # Escalation-ordered payloads for authorized live tests
 
 ```
+
+## Pre-registered study (2026-08)
+
+- `PREREGISTRATION.md` — design frozen before data collection (kept byte-frozen as registered)
+- `RESULTS.md` — published outcome: declaration metrics, the disclosed deviation from the pre-registered independent-rater item (§8), and reproduction steps (§12)
+- `TESTSET_MANIFEST.md` + `manifest-test.jsonl` — test-set chain of custody
+- `VALIDATION.md` — precision measurement: method, results, limits
 
 Run the full test suite with `python -m unittest discover tests`.
 

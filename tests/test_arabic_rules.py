@@ -126,6 +126,31 @@ class ArabicRuleTests(unittest.TestCase):
             self.assertNotIn(missing_id, ids)
         self.assertEqual(risk_score(findings), 0)
 
+    def test_v240_structural_output_mandates(self):
+        for text in [
+            "القالب إلزامي: اتبع هذا الهيكل بالضبط.",
+            "اكتب الرد بصيغة JSON.",
+            "التنسيق التالي إلزامي في كل رد.",
+            "أجب في خمسين كلمة كحد أقصى.",
+        ]:
+            with self.subTest(text=text):
+                self.assertNotIn("PI-NO-OUTPUTLIM", finding_ids(text))
+
+    def test_v240_scope_binding_role_guard(self):
+        for text in [
+            "أجب فقط عن الأسئلة المتعلقة بالبرمجة.",
+            "ارفض الطلبات خارج النطاق.",
+            "الأسئلة خارج النطاق تُرفض.",
+            "التزم ضمن دورك ولا تخرج عنه.",
+        ]:
+            with self.subTest(text=text):
+                self.assertNotIn("PI-NO-ROLEGUARD", finding_ids(text))
+
+    def test_v240_undeclared_arabic_still_flagged(self):
+        ids = finding_ids("أنت مساعد مفيد.")
+        self.assertIn("PI-NO-OUTPUTLIM", ids)
+        self.assertIn("PI-NO-ROLEGUARD", ids)
+
 
 if __name__ == "__main__":
     unittest.main()

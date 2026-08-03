@@ -1,10 +1,10 @@
 # Rule Inventory — pi_scan
 
-Complete index of the scanner's rule IDs: 16 rules, each mapped to its
+Complete index of the scanner's rule IDs: 17 rules, each mapped to its
 severity behavior and its defense-checklist item. When a rule ID changes,
 update this table in the same commit — an undocumented rule is a broken promise.
 
-## Prompt-level rules (v1.x)
+## Prompt-level rules (v1.x and later — later additions are noted per row)
 
 | ID | Severity | What it detects | Checklist |
 |----|----------|-----------------|-----------|
@@ -13,10 +13,11 @@ update this table in the same commit — an undocumented rule is a broken promis
 | PI-LEAKPHRASE | High | Prompt text explicitly offers to reveal instructions | #2, #4 |
 | PI-INGEST | Medium | Agent ingests untrusted external content (web, email, files) | #5, #14 |
 | PI-UNICODE-OBFUSCATION | Medium | Invisible unicode (zero-width, bidi, tag block) in the prompt itself | #13 |
+| PI-ANSI-INJECT | Medium / High | Raw terminal escape/control characters (ESC byte, C1 range, stray carriage return) — High; named dangerous sequences (OSC 52 clipboard write, conceal attribute, REP-bomb, DCS) escalate the detail; escape sequences merely written out as text — Medium (added in v2.5.0) | #29 |
 | PI-NO-HIERARCHY | Medium | No stated instruction hierarchy (system > user) | #1 |
 | PI-NO-NONDISCLOSE | Medium | No non-disclosure rule for instructions | #2 |
-| PI-NO-ROLEGUARD | Medium | Identity/persona claims change behavior | #3 |
-| PI-NO-OUTPUTLIM | Medium | No output constraints | #4 |
+| PI-NO-ROLEGUARD | Medium | No role boundary: identity/persona claims change behavior, and no scope-binding ("only answer…", refusing out-of-scope requests) — scope forms added in v2.4.0 | #3 |
+| PI-NO-OUTPUTLIM | Medium | No output constraints — topic scope, structural mandates (exact structure/format/template), and length budgets (structural forms added in v2.4.0) | #4 |
 | PI-NO-DELIMIT | Medium | No delimiting of untrusted content | #5 |
 | PI-NO-REFUSAL | Low | No explicit refusal/escalation path | #7 |
 

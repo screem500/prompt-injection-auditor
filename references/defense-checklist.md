@@ -8,6 +8,7 @@ Hardening measures for system prompts and agent configurations. Map every audit 
 - Architectural Defenses
 - Monitoring and Response
 - Agent-Runtime Defenses (2026 families)
+- Terminal-Content Sanitization
 
 ## Prompt-Level Defenses
 
@@ -51,3 +52,7 @@ These four items exist so that every runtime finding emitted by `pi_scan.py` map
 27. **Verify and pin every package the agent installs** — Maps to `PI-SUPPLY-CHAIN`. Models hallucinate package names at a meaningful rate and attackers pre-register the repeats ("slopsquatting"). Never install a dependency the model named without checking it against a vetted lockfile or allowlist; pin exact versions with hashes; require human approval for any new dependency; and run installs in a sandbox with no access to credentials.
 
 28. **Gate workspace configuration behind a trust decision** — Maps to `PI-AUTOLOAD-CONFIG`. Files such as `.cursorrules`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and devcontainer definitions are read out of the repository, which means whoever can write to the repository can write to the agent's configuration. Never read them before the user has made an explicit trust decision about that workspace, and re-verify on every change: approving one version of a config file is not approval of the next (Cursor CVE-2025-54136). Where the file only needs to inform, not instruct, load it as data under the same delimiting rules as any other untrusted content (#5).
+
+## Terminal-Content Sanitization
+
+29. **Neutralize terminal escape/control characters at ingestion** — Maps to `PI-ANSI-INJECT`. Text carrying raw ANSI sequences renders one view to a human reviewer and another to the terminal or model pipeline: the conceal attribute (`ESC[8m`) hides instructions from the reviewer while the model still reads them, carriage returns and cursor moves overwrite what was displayed, OSC 52 writes to the user's clipboard, and REP sequences hang the terminal outright. Any content taken from files, tool results, MCP descriptions, or retrieved documents must be sanitized before display or model ingestion: replace the ESC byte with a visible placeholder, drop the C1 range, and keep only tab and newline (the approach Trail of Bits shipped in PrintGuard after demonstrating ANSI deception through MCP tool descriptions in 2025).

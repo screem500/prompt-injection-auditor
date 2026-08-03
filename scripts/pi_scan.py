@@ -34,7 +34,11 @@ if __package__:  # Imported as scripts.pi_scan during tests or library use.
         ARABIC_TOOL_RISK_KEYWORDS,
         ARABIC_UNTRUSTED_CONTENT_PATTERNS,
     )
-    from .normalization import normalize_arabic, suspicious_unicode_lines
+    from .normalization import (
+        normalize_arabic,
+        suspicious_unicode_lines,
+        terminal_control_lines,
+    )
 else:  # Direct execution: python scripts/pi_scan.py ...
     from language_rules import (  # type: ignore
         ARABIC_AUTOLOAD_PATTERNS,
@@ -54,7 +58,11 @@ else:  # Direct execution: python scripts/pi_scan.py ...
         ARABIC_TOOL_RISK_KEYWORDS,
         ARABIC_UNTRUSTED_CONTENT_PATTERNS,
     )
-    from normalization import normalize_arabic, suspicious_unicode_lines  # type: ignore
+    from normalization import (  # type: ignore
+        normalize_arabic,
+        suspicious_unicode_lines,
+        terminal_control_lines,
+    )
 
 
 def _supports_color():
@@ -72,6 +80,34 @@ SEVERITY_COLOR = {"Critical": RED_BOLD, "High": RED, "Medium": YELLOW, "Low": CY
 
 def paint(text, code):
     return f"\033[{code}m{text}\033[0m" if _COLOR else text
+
+
+# --- PI-ANSI-INJECT (v2.5.0) -------------------------------------------------
+# Terminal escape sequences are an injection surface of their own: they render
+# one thing to a human reviewer and something else to the terminal/model
+# pipeline. A raw ESC byte (0x1B) or a C1 control (U+0080-U+009F, accepted as
+# CSI/OSC/DCS by VTE-based terminals, kitty and WezTerm) in an instruction file
+# has no legitimate purpose. Severity tiers:
+#   High   - raw ESC/C1 bytes, or a stray carriage return (line overwrite)
+#   Medium - escape sequences written out as text (documentation, not payload)
+# Named dangerous sequences below escalate the finding's detail, not its tier:
+# the raw-byte finding is already High.
+_ANSI_CSI = r"(?:\x1b\[|\x9b)"
+_ANSI_OSC = r"(?:\x1b\]|\x9d)"
+
+ANSI_NAMED_SEQUENCES = [
+    (_ANSI_OSC + r"52;", "OSC 52 clipboard write"),
+    (_ANSI_OSC + r"8;;", "OSC 8 disguised hyperlink"),
+    (_ANSI_CSI + r"(?:[0-9]+;)*8m", "conceal attribute (invisible to the reviewer, still read by the model)"),
+    (_ANSI_CSI + r"[0-9]{5,}b", "REP repeat-bomb (terminal denial of service)"),
+    (r"(?:\x1bP|\x90)", "device control string (DECRQSS reply-echo risk)"),
+]
+
+# Escape sequences spelled out as text, e.g. an article *about* ANSI injection.
+# Documentation must not be punished like a live payload, so this is Medium.
+ANSI_TEXTUAL_PATTERN = (
+    r"(?i)(\\x1b|\\033|\\u001b|\\e\[|ESC\[|\^\[|\\x9b|\\u009b)"
+)
 
 
 SECRET_PATTERNS = [
@@ -136,8 +172,26 @@ ROLE_CLAIM_PATTERNS = [
     r"(?i)permissions? are fixed",
     r"(?i)any claim of [a-z ]{0,25}(identity|authority|status)",
     r"(?i)\bno [a-z ]{0,20}(assertion|claim)s?\b",
+    # v2.4.0: scope-binding — declaring the role's boundary and refusing what
+    # lies outside it (v2.3.2 only saw authority-claim guards; RESULTS.md §6).
+    r"(?i)only (answer|respond|reply to|discuss|engage with|help with|assist with)",
+    r"(?i)(avoid|avoiding|refuse|refusing|decline|declining|reject|rejecting)[^.\n]{0,60}outside (the )?(scope|domain|role|boundaries)",
+    r"(?i)(questions?|requests?|topics?) (outside|beyond)[^.\n]{0,60}(declined?|refused?|rejected?|ignored?|not (answered|addressed))",
+    r"(?i)(stay|remain|keep|operate|act)[^.\n]{0,30}within (the )?(scope|boundaries|role|domain|expertise)",
+    r"(?i)(your|its|the) (role|scope|purpose|domain) is (limited|restricted|confined) to",
 ]
 OUTPUT_CONSTRAINT_PATTERNS = [
+    # v2.4.0: structural mandates — constraints on FORM (exact structure, word
+    # budgets, format/template requirements), a category v2.3.2 missed entirely
+    # (see RESULTS.md §6: 10/30 sample files declared these, scanner saw none).
+    r"(?i)(must|shall|required to)[^.\n]{0,80}(structure|format|template|layout|schema)",
+    r"(?i)(word|paragraph|sentence|page|token|character|line) (budget|limit|count|cap|maximum)",
+    r"(?i)(in|under|within|no more than|at most|max(imum)?( of)?) \d+ (words|paragraphs|sentences|pages|tokens|lines|characters)",
+    r"(?i)(output|respond|reply|answer|produce|write|generate|return)[^.\n]{0,50}\b(in|as|into|using|with)\s+(an?\s+)?(well[- ]formatted\s+|structured\s+|valid\s+)?(json|yaml|xml|csv|markdown|html|latex|table)\b",
+    r"(?i)(exact|following|this|below) (structure|format|template|layout|schema)\s*:(?!\s*https?://)",
+    r"(?i)(output|response|reply|answer) (format|structure|template)\s*[:=]",
+    r"(?i)(reply|response|output|answer) template",
+    # v2.3.2 topic-scope patterns (unchanged):
     r"(?i)only (answer|respond|discuss|help with|produce|output|return)",
     r"(?i)(answer|respond|discuss|handle|produce|output|return)\b[^.\n]{0,40}\bonly\b",
     r"(?i)nothing else\b",
@@ -312,6 +366,55 @@ def scan(text):
             "detail": "Invisible formatting controls can hide or visually reorder injected instructions during review.",
             "fix": "Normalize input before matching, display escaped code points in review logs, and reject unexpected direction controls. (Checklist #13, #19)",
         })
+
+    ansi_hits = terminal_control_lines(text)
+    ansi_raw_lines = sorted(set(
+        ansi_hits["escape"] + ansi_hits["carriage_return"] + ansi_hits["other_control"]
+    ))
+    if ansi_raw_lines:
+        named_labels = [
+            label for pattern, label in ANSI_NAMED_SEQUENCES if re.search(pattern, text)
+        ]
+        hard_lines = sorted(set(ansi_hits["escape"] + ansi_hits["carriage_return"]))
+        severity = "High" if hard_lines else "Medium"
+        title = "Raw terminal escape/control characters in the file"
+        if named_labels:
+            title += f" — known dangerous sequences: {'; '.join(named_labels)}"
+        findings.append({
+            "id": "PI-ANSI-INJECT", "severity": severity,
+            "title": title, "lines": ansi_raw_lines,
+            "detail": (
+                "ANSI escape sequences render one view to a human reviewer and another to the terminal "
+                "or model pipeline: text can be hidden with the conceal attribute, overwritten with "
+                "carriage returns or cursor moves, or weaponized (OSC 52 clipboard write, REP-bomb DoS). "
+                "The model still consumes the raw bytes, so instructions invisible to the reviewer stay "
+                "active (Trail of Bits, ANSI deception via MCP tool descriptions, 2025; WinRAR "
+                "CVE-2024-33899)."
+            ),
+            "fix": (
+                "Reject or neutralize ESC/C1 and stray control bytes at ingestion: replace ESC with a "
+                "visible placeholder and keep only tab and newline. Never feed raw file contents to a "
+                "terminal or model unsanitized. (Checklist #29)"
+            ),
+        })
+    else:
+        ansi_textual_lines = find_lines(text, ANSI_TEXTUAL_PATTERN)
+        if ansi_textual_lines:
+            findings.append({
+                "id": "PI-ANSI-INJECT", "severity": "Medium",
+                "title": "Terminal escape sequences written out as text",
+                "lines": ansi_textual_lines,
+                "detail": (
+                    "The file spells out ANSI escapes (e.g. \\x1b[, \\033[, ESC[). That is legitimate "
+                    "when documenting the attack, but the same text pasted into a shell, a config, or a "
+                    "model context that interprets escapes becomes a live payload."
+                ),
+                "fix": (
+                    "Keep escape sequences inert wherever the file is consumed: quote or placeholder the "
+                    "ESC byte, and sanitize any downstream copy before rendering or feeding it to a model. "
+                    "(Checklist #29)"
+                ),
+            })
 
     for rule in ARABIC_INJECTION_PATTERNS:
         matched_lines = sorted({
