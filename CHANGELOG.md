@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.5.2 — 2026-08-08
+
+### Fixed — pi_shield was blind to Unicode tag-block smuggling (ASCII smuggling)
+
+A community question on the v2.5 announcement — does PI-ANSI-INJECT catch
+U+E0000 tag characters? — exposed a real gap. The scanner was already
+covered: PI-UNICODE-OBFUSCATION flags the entire tag block because it is
+Unicode category Cf and the rule covers the whole class. But pi_shield's
+Layer 1 stripped only an explicit zero-width/bidi list, so a payload
+written entirely in invisible tag characters passed the shield
+ALLOW 0/100 — decoded by no one on the way in, still read by the model.
+
+`normalize()` now decodes the printable tag range (U+E0020–U+E007E) back to
+ASCII — Layer-3 scoring then sees the payload ("ignore all previous
+instructions" smuggled in tags scores 95/100 → BLOCK) — drops the block's
+non-printable tags, and strips every remaining category-Cf format
+character, superseding the explicit list with the full class and matching
+the scanner's coverage. Benign tag text passes through as visible ASCII.
+
+Scanner and rules untouched: 17 rule IDs, no corpus movement.
+
+### Tests
+
+7 new tag-smuggling tests in `tests/test_shield.py` (122 total): tag decode,
+non-printable drop, BLOCK on smuggled injection, benign pass-through, no
+tag residue in sanitized output, zero-width regression, Arabic-text no-op.
+
 ## v2.5.1 — 2026-08-03
 
 ### Fixed — PI-ANSI-INJECT was blind to carriage returns through the CLI

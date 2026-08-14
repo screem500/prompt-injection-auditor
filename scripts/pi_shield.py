@@ -53,6 +53,29 @@ _ANSI_C1_RE = re.compile("[\x80-\x9f]")  # C1 controls incl. single-byte CSI/OSC
 _ANSI_C0_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f\x7f]")  # keeps \t \n \r
 
 
+def _neutralize_format_chars(t):
+    """Neutralize invisible Unicode format characters (category Cf).
+
+    The Unicode tag block (U+E0001-U+E007F) is ASCII smuggling: each tag in
+    the printable range U+E0020-U+E007E encodes one ASCII character, so a
+    payload invisible to the reviewer is still read by the model. Decode that
+    range back to ASCII so Layer-3 scoring can see the payload; drop the
+    block's non-printable tags (U+E0001, U+E007F). Every remaining Cf format
+    character (zero-width, bidi controls, Arabic letter mark, soft hyphen...)
+    is stripped — this supersedes the old explicit ZERO_WIDTH + BIDI_CONTROLS
+    list with the whole class, matching the scanner's PI-UNICODE-OBFUSCATION
+    coverage.
+    """
+    out = []
+    for ch in t:
+        cp = ord(ch)
+        if 0xE0020 <= cp <= 0xE007E:
+            out.append(chr(cp - 0xE0000))
+        elif unicodedata.category(ch) != "Cf":
+            out.append(ch)
+    return "".join(out)
+
+
 def normalize(text):
     """Layer 1: force text into a canonical, inert state."""
     t = text.replace("\x1b", ESCAPE_PLACEHOLDER)  # ESC can start any ANSI sequence
@@ -61,8 +84,7 @@ def normalize(text):
     t = t.replace("\r", CR_PLACEHOLDER)
     t = _ANSI_C0_RE.sub(CONTROL_PLACEHOLDER, t)
     t = unicodedata.normalize("NFKC", t)
-    for ch in ZERO_WIDTH + BIDI_CONTROLS:
-        t = t.replace(ch, "")
+    t = _neutralize_format_chars(t)
     return t.translate(HOMOGLYPHS)
 
 
