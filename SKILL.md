@@ -47,10 +47,10 @@ Also record the agent's **runtime surface**, since the 2026 rule families key of
 python scripts/pi_scan.py <target-file> [--json report.json] [--md report.md]
 ```
 
-The scanner checks 17 rule IDs across two groups (full index: `references/rule-inventory.md`):
+The scanner checks 18 rule IDs across two groups (full index: `references/rule-inventory.md`):
 
 - **Prompt-level classes** — missing instruction hierarchy, secret-like strings, leak-prone phrasing, missing output constraints, untrusted-content handling gaps, declared powerful capabilities.
-- **2026 agent-runtime classes** — `PI-MCP` (agent can add/register MCP tool servers), `PI-SANDBOX-BYPASS` (string-based command gates, sandbox trust keyed off agent-chosen paths), `PI-MEMORY` (persistent memory written with no integrity or provenance rule), `PI-SUPPLY-CHAIN` (agent installs packages it names itself), PI-AUTOLOAD-CONFIG (workspace configuration read before any trust decision). English and Arabic detection; see `references/attack-patterns-2026.md`.
+- **2026 agent-runtime classes** — `PI-MCP` (agent can add/register MCP tool servers), `PI-SANDBOX-BYPASS` (string-based command gates, sandbox trust keyed off agent-chosen paths), `PI-MEMORY` (persistent memory written with no integrity or provenance rule), `PI-SUPPLY-CHAIN` (agent installs packages it names itself), PI-AUTOLOAD-CONFIG (workspace configuration read before any trust decision), `PI-NO-CONFIRM-GATE` (consequential actions — send/delete/pay/publish — declared with no confirmation, staging, or stop rule; added in v2.6.0). English and Arabic detection; see `references/attack-patterns-2026.md`.
 
 Output is a 0–100 risk score with findings. Treat scanner output as leads, not verdicts — verify each finding by reading the target.
 
@@ -95,6 +95,7 @@ Severity guide:
 - Agent can send data out AND ingests untrusted content — EchoLeak-class (checklist #9, #10, #11)
 - `PI-MCP` at execution tier: agent can register or execute MCP tool servers (checklist #24)
 - `PI-AUTOLOAD-CONFIG` with a declared execution capability: opening a repository is enough to run attacker-chosen code (checklist #28)
+- `PI-NO-CONFIRM-GATE` under untrusted ingestion: one injected instruction sends, deletes, or pays at full privilege with no gate in the way (checklist #30)
 - `PI-EMBEDDED-INSTRUCTION`: embedded instructions in the target attempting to alter audit scope or methodology (checklist #23)
 
 **High**
@@ -104,6 +105,7 @@ Severity guide:
 - `PI-MEMORY`: memory writes under untrusted ingestion (checklist #26)
 - `PI-SUPPLY-CHAIN`: agent installs model-named packages (checklist #27)
 - `PI-AUTOLOAD-CONFIG`: workspace configuration auto-loaded with no stated trust decision (checklist #28)
+- `PI-NO-CONFIRM-GATE`: consequential actions declared with no confirmation or stop rule (checklist #30)
 
 **Medium**
 - Persona override succeeds; missing output constraints; weak refusal behavior (checklist #1, #3, #4, #7)
@@ -126,17 +128,18 @@ Severity guide:
 All suites run with `python -m unittest tests.<module>`. Run the full set after any rule or shield change.
 
 - `test_shield.py` — 11 cases proving pi_shield against evasion (homoglyphs, zero-width, base64, delimiter escape).
-- `test_mcp_guard.py` — 18 cases for the MCP tool-response guard (v2.2).
+- `test_mcp_guard.py` — 20 cases for the MCP tool-response guard (v2.2).
 - `test_runtime_rules.py` — 19 cases for the 2026 agent-runtime rules (v2.2).
 - `test_arabic_rules.py` — Arabic injection detection (v2.1).
 - `test_normalization.py` — Arabic normalization unit tests (v2.1).
 - `test_english_regression.py` — English regression guard.
+- `test_fp_regression.py` — 60 false-positive regression cases (v2.6.1, four review rounds): destructive pairing and punctuation tolerance, unicode context (character and line level, ALM), shield output fidelity, case-sensitive DAN, mcp_guard sanitized form / notes / OSC 52 / dangerous ANSI, agent-voice gate (sentence-scoped, workflow suppression, deploy-object recall), fullwidth delimiters and tag names.
 - `test_cli.py` — CLI end-to-end tests.
 
 ### references/
 - `attack-patterns.md` — Catalog of prompt-injection techniques (direct, indirect, encoding, exfiltration, multi-agent) with real-world examples. Read during Step 3.
 - `attack-patterns-2026.md` — The 2026 agent-runtime families (MCP tool poisoning, sandbox/allowlist bypass, persistent memory injection, slopsquatting) with verified CVE anchors. Read when auditing agents with tools, sandboxes, memory, or package installs.
-- `rule-inventory.md` — Index of all 17 scanner rule IDs with severity behavior and checklist mapping. Consult when reporting findings or adding rules.
-- `defense-checklist.md` — 27 numbered hardening measures; each item maps to a finding class. Read during Step 5.
+- `rule-inventory.md` — Index of all 18 scanner rule IDs with severity behavior and checklist mapping. Consult when reporting findings or adding rules.
+- `defense-checklist.md` — 30 numbered hardening measures; each item maps to a finding class. Read during Step 5.
 - `defense-architecture.md` — The 5-layer defense design behind pi_shield, usage patterns, and honest limits of prompt-level filtering. Read when implementing input protection.
 - `test-payloads.md` — Organized payload suite for authorized live testing, ordered by escalation. Read during Step 4.

@@ -205,3 +205,18 @@ ARABIC_MEMORY_GUARD_PATTERNS = [
 ARABIC_SUPPLY_CHAIN_FETCH_PATTERNS = [
     r"(?:ثبت|تثبيت|نزل|تنزيل|اجلب|جلب|استنسخ).{0,25}(?:حزمه|الحزمه|مكتبه|المكتبه|مستودع|المستودع|تبعيه|تبعيات)",
 ]
+
+# --- v2.6.0: confirmation-gate guard ----------------------------------------
+# Arabic phrasings that state a human confirmation, approval, or stop rule for
+# consequential actions (send / delete / pay / publish). The presence of any of
+# these suppresses PI-NO-CONFIRM-GATE. Written for normalized text from
+# normalization.py (no diacritics, tatweel removed, hamzated alef -> ا, ة -> ه).
+
+ARABIC_CONFIRM_GATE_PATTERNS = [
+    r"(?:اطلب|يطلب|تطلب|احصل|يحصل|انتظر|ينتظر)\s*(?:علي|على)?\s*(?:تاكيد|موافقه|اذن|تصريح)",
+    r"(?:اسال|يسال|تسال|تاكد|يتاكد|راجع)\s+(?:من\s+)?المستخدم\s+(?:قبل|اولا)",
+    r"قبل\s+(?:اي\s+)?(?:ارسال|حذف|دفع|نشر|تنفيذ|شراء|تحويل).{0,40}(?:تاكيد|موافقه|اذن|اسال|يسال)",
+    r"لا\s+(?:ترسل|يرسل|تحذف|يحذف|تدفع|يدفع|تنشر|ينشر|تنفذ|ينفذ).{0,40}(?:دون|بدون|الا\s+بعد)\s*(?:تاكيد|موافقه|اذن)",
+    r"(?:موافقه|مراجعه|تاكيد)\s+(?:بشري|بشريه|يدوي|يدويه)",
+    r"(?:اوامر|طلبات|امر|طلب)\s+(?:التوقف|الايقاف)\s+(?:تنفذ|ينفذ|تحترم|يحترم)",
+]

@@ -77,7 +77,13 @@ def _neutralize_format_chars(t):
 
 
 def normalize(text):
-    """Layer 1: force text into a canonical, inert state."""
+    """Layer 1 (scoring view): force text into a canonical, inert state.
+
+    This is an aggressive SCORING aid: NFKC and homoglyph folding make
+    look-alike evasions visible to the patterns. It is not meant for the
+    model-bound output — folding rewrites ordinary Cyrillic/Greek text. Use
+    sanitize_output() for the text that is actually passed on.
+    """
     t = text.replace("\x1b", ESCAPE_PLACEHOLDER)  # ESC can start any ANSI sequence
     t = _ANSI_C1_RE.sub(CONTROL_PLACEHOLDER, t)
     t = t.replace("\r\n", "\n")  # judge CR only after CRLF is normalized
@@ -88,6 +94,40 @@ def normalize(text):
     return t.translate(HOMOGLYPHS)
 
 
+# Category-Cf characters that are legitimate typography and survive in
+# model-bound output: ZWNJ shapes Persian/Arabic words (می‌خواهم); ZWJ joins
+# emoji sequences (👨‍👩‍👧) and Indic conjuncts. Everything else invisible is
+# stripped or decoded so no hidden character reaches the model.
+_OUTPUT_KEEP_CF = frozenset({"\u200c", "\u200d"})
+
+
+def sanitize_output(text):
+    """Neutralize text for model-bound output while keeping it human-readable.
+
+    Unlike normalize(), nothing here rewrites visible characters: no NFKC, no
+    homoglyph folding, so Russian/Greek text and emoji pass through intact.
+    What never passes through:
+      * terminal control bytes — replaced with visible placeholders
+      * the Unicode tag block — printable tags are DECODED back to visible
+        ASCII (nothing invisible may reach the model), non-printable dropped
+      * every other invisible format character (zero-width space, bidi
+        controls, word joiner, soft hyphen, ...) except ZWNJ/ZWJ above
+    """
+    t = text.replace("\x1b", ESCAPE_PLACEHOLDER)
+    t = _ANSI_C1_RE.sub(CONTROL_PLACEHOLDER, t)
+    t = t.replace("\r\n", "\n")
+    t = t.replace("\r", CR_PLACEHOLDER)
+    t = _ANSI_C0_RE.sub(CONTROL_PLACEHOLDER, t)
+    out = []
+    for ch in t:
+        cp = ord(ch)
+        if 0xE0020 <= cp <= 0xE007E:
+            out.append(chr(cp - 0xE0000))  # smuggled ASCII brought into the open
+        elif ch in _OUTPUT_KEEP_CF or unicodedata.category(ch) != "Cf":
+            out.append(ch)
+    return "".join(out)
+
+
 # ---------------------------------------------------------------------------
 # Layer 2 — Safe delimiting (with closing-tag escape neutralization)
 # ---------------------------------------------------------------------------
@@ -95,16 +135,48 @@ def normalize(text):
 _DELIM_TAG_RE = re.compile(r"</?\s*" + DELIM + r"\s*>", re.IGNORECASE)
 
 
+def _fold_probe(text):
+    """Length-preserving NFKC fold used ONLY for tag detection.
+
+    Forged tags come in look-alike codepoints — fullwidth ＜／ｕｓｅｒ＿ｄａｔａ＞
+    (U+FF1C/U+FF0F/fullwidth letters/U+FF1E), mathematical angle brackets
+    ⟨ ⟩, CJK brackets 〈 〉 — that a literal "</user_data>" check misses but
+    NFKC folds to the plain ASCII form. Folding char-by-char and keeping a
+    fold only when it yields exactly one character keeps probe positions
+    aligned with the original, so matches map back byte-for-byte.
+    """
+    out = []
+    for ch in text:
+        folded = unicodedata.normalize("NFKC", ch)
+        out.append(folded if len(folded) == 1 else ch)
+    return "".join(out)
+
+
+_BRACKET_NEUTRALIZE = {"<": "\u2039", ">": "\u203A"}
+
+
 def escape_delimiters(text):
     """Neutralize attempts to close/reopen our delimiter from inside the input.
 
-    Attackers send '</user_data><system>...' to break out of the container.
-    Replace the angle brackets of any such tag with harmless look-alikes.
+    Attackers send '</user_data><system>...' — or the same tag in fullwidth /
+    mathematical / CJK look-alike codepoints — to break out of the container.
+    The tag is detected on a length-preserving NFKC fold of the input, then
+    the bracket characters are replaced in place in the ORIGINAL text with
+    harmless look-alikes, so any codepoint NFKC folds to a single '<'/'>' is
+    covered, not two hand-picked ones (third review round).
     Returns (escaped_text, escape_attempts_count).
     """
-    count = len(_DELIM_TAG_RE.findall(text))
-    escaped = _DELIM_TAG_RE.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
-    return escaped, count
+    probe = _fold_probe(text)
+    matches = list(_DELIM_TAG_RE.finditer(probe))
+    if not matches:
+        return text, 0
+    chars = list(text)
+    for match in matches:
+        for i in range(match.start(), match.end()):
+            replacement = _BRACKET_NEUTRALIZE.get(probe[i])
+            if replacement is not None:
+                chars[i] = replacement
+    return "".join(chars), len(matches)
 
 
 # ---------------------------------------------------------------------------
@@ -121,8 +193,15 @@ PATTERNS = [
     (r"\bwhat were you told\b|\byour (initial |original )?(instructions|rules|prompt)\b", 20, "extraction probe"),
     (r"\b(translate|encode|base64|rot13|hex)\b.{0,40}\b(instructions?|prompt|rules)\b", 30, "output laundering"),
     (r"\bi am (the )?(developer|admin|creator|owner|an? openai)\b", 25, "authority spoofing"),
-    (r"\bno (restrictions|guidelines|rules)\b|\bjailbreak\b|\bDAN\b", 35, "jailbreak attempt"),
+    (r"\bno (restrictions|guidelines|rules)\b|\bjailbreak\b", 35, "jailbreak attempt"),
     (r"\bnew (directive|instruction|rule)s?\s*[:=]", 25, "directive injection"),
+]
+
+# Case-sensitive patterns: the DAN acronym ("Do Anything Now") is all-caps.
+# Matching it case-insensitively flagged every input mentioning a person
+# named Dan ("Hi, I'm Dan" scored 35 — a false positive).
+CASE_SENSITIVE_PATTERNS = [
+    (r"\bDAN\b", 35, "jailbreak attempt"),
 ]
 
 
@@ -130,10 +209,21 @@ def score_patterns(text):
     """Return (score, [(label, weight), ...]) for a piece of text."""
     hits = []
     score = 0
+    fired_labels = set()
     for pattern, weight, label in PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
             hits.append((label, weight))
             score += weight
+            fired_labels.add(label)
+    for pattern, weight, label in CASE_SENSITIVE_PATTERNS:
+        # Same finding family as a case-insensitive tuple: fire once, exactly
+        # as when DAN was an alternative inside that tuple — never stacked.
+        if label in fired_labels:
+            continue
+        if re.search(pattern, text):
+            hits.append((label, weight))
+            score += weight
+            fired_labels.add(label)
     return min(score, 100), hits
 
 
@@ -210,17 +300,26 @@ def shield_input(user_text, warn_at=30, block_at=60):
     """
     findings, notes = [], []
 
-    # Layer 1: normalize
+    # Layer 1: two views of the same input. `norm` is the aggressive scoring
+    # view (NFKC + homoglyph folding expose look-alike evasion to patterns);
+    # `out` is the faithful model-bound view (controls neutralized, hidden
+    # characters stripped, but visible text untouched — Cyrillic stays
+    # Cyrillic, ZWNJ/ZWJ typography and emoji sequences survive).
     norm = normalize(user_text)
-    if norm != user_text:
+    out = sanitize_output(user_text)
+    if out != user_text:
         notes.append("input contained terminal-control/hidden unicode characters — neutralized")
 
     # Layer 3 (raw text scoring, before wrapping)
     score, hits = score_patterns(norm)
     findings.extend(f"{label} (+{weight})" for label, weight in hits)
 
-    # Layer 2: delimiter escape attempt?
-    escaped, escapes = escape_delimiters(norm)
+    # Layer 2: delimiter escape attempt? Detection runs on both views — the
+    # scoring view also catches fullwidth-look-alike tags via NFKC; the
+    # neutralizing replacement is applied to the model-bound view.
+    escaped, escapes_out = escape_delimiters(out)
+    _, escapes_norm = escape_delimiters(norm)
+    escapes = max(escapes_out, escapes_norm)
     if escapes:
         findings.append(f"delimiter escape attempt: {escapes} closing/opening tag(s) (+40)")
         score += 40

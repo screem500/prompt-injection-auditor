@@ -73,6 +73,7 @@ table is cited anywhere.
 | `PI-MEMORY` | Agent Memory Injection | — | Direct one-to-one match. |
 | `PI-SUPPLY-CHAIN` | Compromised-Ingestion-Process Injection | — | The dependency is the ingestion path. |
 | `PI-AUTOLOAD-CONFIG` | Internal Context-Data Injection; Attacker-Compromised External Injection | — | A repository-controlled config file is internal context data with configuration authority. |
+| `PI-NO-CONFIRM-GATE` | — | — | Orthogonal to both axes by design: the rule flags a missing mitigation, not a delivery method or technique. Whichever IM/PT succeeds against the prompt, the absent gate converts that success into an immediate consequential action (v2.6.0). |
 
 ## Reviewer-level finding
 

@@ -44,6 +44,11 @@ against prompts in the wild; see Limits.
 | Vulnerable targets that fired their rule | 11 of 12 | **12 of 12** |
 | Unit tests | 76 pass | 76 pass |
 
+> **Current measurement (v2.6.1, 2026-09-02):** the table above is the
+> historical v2.2 run kept for the record. Today's numbers are: hardened
+> mean **3.0** (8 files), vulnerable mean **46.3** (13 files), separation
+> **43.3**, **201 tests** — enforced by the CI gate job.
+
 An 8-point gap meant a prompt with a live API key scored about the same as a
 carefully hardened one. That is the finding the benchmark existed to produce.
 
@@ -125,14 +130,20 @@ two are measured against different things.
 | Decision | Count | Share |
 |----------|------:|------:|
 | BLOCK — rejected before the model sees it | 102 | 15.7% |
-| WARN — passed sanitised, logged for monitoring | 134 | 20.6% |
-| ALLOW — not flagged at all | 414 | 63.7% |
+| WARN — passed sanitised, logged for monitoring | 128 | 19.7% |
+| ALLOW — not flagged at all | 420 | 64.6% |
 
 Hard-stop recall (BLOCK only): **15.7%**
-Noticed at all (BLOCK + WARN): **36.3%**
-Mean threat score: 25.1 / 100
+Noticed at all (BLOCK + WARN): **35.4%**
+Mean threat score: 24.8 / 100
 
 Reproduced independently on two machines with identical results.
+
+*Re-measured for v2.6.1 (2026-09-02): WARN 134 → 128, ALLOW 414 → 420,
+noticed 36.3% → 35.4%, mean 25.1 → 24.8. The whole movement is six payloads
+that scored WARN 35 only because they mention a person named Dan — the
+false-positive class the case-sensitive DAN fix removes. They were detected
+for the wrong reason; the CHANGELOG records the trade-off.*
 
 ### Reading the number honestly
 
@@ -142,7 +153,7 @@ This is a low number and it is published as measured.
 jailbreak attempts, persona hijacking, instruction override. The patterns
 work when the phrasing lands inside them.
 
-**What it misses.** The bulk of the 414 that passed are long role-play
+**What it misses.** The bulk of the 420 that passed are long role-play
 jailbreaks — the DAN family and its descendants — phrased outside the
 specific constructions the shield encodes. This is a coverage gap, not an
 implementation bug: no pattern in the shield was written to match them.

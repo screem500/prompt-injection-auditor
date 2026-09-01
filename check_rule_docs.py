@@ -44,6 +44,7 @@ RUNTIME_RULES = {
     "PI-MEMORY",
     "PI-SUPPLY-CHAIN",
     "PI-AUTOLOAD-CONFIG",
+    "PI-NO-CONFIRM-GATE",
 }
 RUNTIME_DOCS = ["SKILL.md", "references/attack-patterns-2026.md"]
 

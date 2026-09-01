@@ -36,9 +36,13 @@ from dataclasses import dataclass, field
 # Reuse pi_shield's battle-tested layers. Works both when imported as
 # scripts.mcp_guard (tests, repo root) and when run directly (CLI).
 try:
-    from scripts.pi_shield import normalize, score_patterns, scan_encoded
+    from scripts.pi_shield import (
+        normalize, sanitize_output, score_patterns, scan_encoded, _fold_probe,
+    )
 except ImportError:  # direct execution: python scripts/mcp_guard.py
-    from pi_shield import normalize, score_patterns, scan_encoded
+    from pi_shield import (
+        normalize, sanitize_output, score_patterns, scan_encoded, _fold_probe,
+    )
 
 # Arabic support is optional at import time so older checkouts still run.
 try:
@@ -102,6 +106,25 @@ MCP_PATTERNS = [
 # some normalizers. Detected on RAW text before normalization strips them.
 _UNICODE_TAG_RE = re.compile(r"[\U000E0000-\U000E007F]")
 
+# OSC 52 (clipboard write): ESC ] 52 ; or the C1 single-char form \x9d 52.
+_OSC52_RE = re.compile("(?:\x1b\\]|\x9d)52[;:]")
+
+# Terminal sequences that are dangerous in their own right, each +60 (BLOCK),
+# matched on RAW text. SGR color/rendition stays weightless on purpose
+# (captured build logs carry it) — but SGR 8 (conceal) is NOT a color: it is
+# the exact "invisible to the reviewer, readable to the model" primitive
+# PI-ANSI-INJECT describes, so it blocks (third review round).
+_ANSI_DANGEROUS = [
+    (re.compile("\x1b\\[(?:[0-9]*;)*8(?:;[0-9]*)*m"),
+     "terminal conceal attribute (SGR 8)"),
+    (re.compile("(?:\x1b\\]|\x9d)8[;:]"),
+     "terminal hyperlink sequence (OSC 8)"),
+    (re.compile("\x1b\\[[0-9]{2,}b"),
+     "terminal repeat-character flood (REP)"),
+    (re.compile("(?:\x1bP|\x90)"),
+     "device control string (DCS)"),
+]
+
 # Tool data is never a command channel, so a single high-severity Arabic
 # injection hit inside a tool response is enough to block outright.
 _AR_SEVERITY_WEIGHT = {"Critical": 60, "High": 60, "Medium": 25, "Low": 10}
@@ -137,6 +160,19 @@ def _scan_chunk(text):
         findings.append("invisible unicode tag characters (+60)")
         score += 60
 
+    # 0b. Terminal clipboard-write (OSC 52) — raw text, same stance as
+    # PI-ANSI-INJECT in the scanner. SGR color sequences stay weightless on
+    # purpose: captured build logs legitimately carry them (second review).
+    if _OSC52_RE.search(text):
+        findings.append("terminal clipboard-write sequence (OSC 52) (+30)")
+        score += 30
+
+    # 0c. Dangerous terminal sequences — conceal, hyperlink, REP flood, DCS.
+    for pattern, label in _ANSI_DANGEROUS:
+        if pattern.search(text):
+            findings.append(f"{label} (+60)")
+            score += 60
+
     # 1. Normalize: NFKC, zero-width/bidi/homoglyph cleanup, then Arabic
     #    diacritics/tatweel/letter-variant cleanup (v2.1 rules, if present).
     norm = normalize(text)
@@ -171,12 +207,26 @@ def _scan_chunk(text):
     return min(score, 100), findings
 
 
+def _sanitize_json(obj):
+    """Rebuild a parsed JSON value with every string passed through
+    sanitize_output(), so the sanitized form stays valid, parseable JSON."""
+    if isinstance(obj, str):
+        return sanitize_output(obj)
+    if isinstance(obj, dict):
+        return {key: _sanitize_json(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json(value) for value in obj]
+    return obj
+
+
 # ---------------------------------------------------------------------------
 # Safe wrapping (Layer 2 for tool data)
 # ---------------------------------------------------------------------------
 
 _TOOL_DELIM = "tool_data"
-_TOOL_TAG_RE = re.compile(r"</?\s*tool_data(?:\s+name=\"[^\"]*\")?\s*>", re.IGNORECASE)
+_TOOL_TAG_RE = re.compile(
+    r"</?\s*tool_data(?:\s+name=\"[^\"]*\")?\s*>", re.IGNORECASE)
+_BRACKET_NEUTRALIZE = {"<": "\u2039", ">": "\u203A"}
 
 
 def wrap_tool_response(text, tool_name=""):
@@ -185,7 +235,21 @@ def wrap_tool_response(text, tool_name=""):
     Any </tool_data> forgery inside the response is neutralized first, so the
     data can never break out of its container and impersonate instructions.
     """
-    escaped = _TOOL_TAG_RE.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
+    # Detect on the length-preserving NFKC fold (fullwidth / mathematical /
+    # CJK look-alikes), then neutralize the bracket chars in place — same
+    # mechanism as pi_shield.escape_delimiters (third review round).
+    probe = _fold_probe(text)
+    matches = list(_TOOL_TAG_RE.finditer(probe))
+    if matches:
+        chars = list(text)
+        for match in matches:
+            for i in range(match.start(), match.end()):
+                replacement = _BRACKET_NEUTRALIZE.get(probe[i])
+                if replacement is not None:
+                    chars[i] = replacement
+        escaped = "".join(chars)
+    else:
+        escaped = text
     name_attr = f' name="{tool_name}"' if tool_name else ""
     return f"<{_TOOL_DELIM}{name_attr}>\n{escaped}\n</{_TOOL_DELIM}>"
 
@@ -216,10 +280,14 @@ def guard_tool_response(text, tool_name="", warn_at=30, block_at=60):
     findings, notes = [], []
 
     chunks = None
+    parsed = None
+    parsed_ok = False
     try:
-        parsed = json.loads(text)
-        chunks = [(path, value) for path, value in _walk_strings(parsed)]
+        candidate = json.loads(text)
+        chunks = [(path, value) for path, value in _walk_strings(candidate)]
         if chunks:
+            parsed = candidate
+            parsed_ok = True
             notes.append(f"JSON input: scanned {len(chunks)} string value(s)")
         else:
             chunks = None
@@ -238,9 +306,28 @@ def guard_tool_response(text, tool_name="", warn_at=30, block_at=60):
         prefix = f"{path}: " if path else ""
         findings.extend(f"{prefix}{f}" for f in chunk_findings)
 
+    # The sanitized form is built from the NEUTRALIZED text, never the raw
+    # input. Pre-v2.6.1 it wrapped the raw string, so terminal escapes
+    # (OSC 52 clipboard writes) and invisible tag characters passed straight
+    # into the "safe" wrapped output. JSON inputs are rebuilt value-by-value
+    # so the sanitized form stays parseable.
+    if parsed_ok:
+        sanitized_body = json.dumps(_sanitize_json(parsed),
+                                    ensure_ascii=False, indent=2)
+        # The note must mean a value actually changed: re-serializing clean
+        # JSON already differs from the original bytes (indent, spacing), so
+        # comparing whole strings fires on every clean document (2nd review).
+        changed = any(sanitize_output(value) != value for _, value in chunks)
+    else:
+        sanitized_body = sanitize_output(text)
+        changed = sanitized_body != text
+    if changed:
+        notes.append("string values neutralized (terminal-control/hidden characters)")
+
     decision = BLOCK if max_score >= block_at else (WARN if max_score >= warn_at else ALLOW)
     return GuardResult(decision=decision, score=max_score, findings=findings,
-                       notes=notes, sanitized=wrap_tool_response(text, tool_name))
+                       notes=notes,
+                       sanitized=wrap_tool_response(sanitized_body, tool_name))
 
 
 def guard_tool_definition(tool, warn_at=30, block_at=60):

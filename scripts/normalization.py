@@ -108,13 +108,93 @@ def normalize_arabic(text: str) -> str:
     return _SPACED_ARABIC_LETTERS_RE.sub(_join_spaced_arabic_letters, normalized)
 
 
+# Scripts whose typography legitimately uses ZWNJ/ZWJ and direction marks:
+# Arabic (incl. Persian/Urdu), Hebrew, Syriac, Thaana, N'Ko and their
+# presentation forms. Between letters of these scripts those characters are
+# ordinary writing, not obfuscation.
+_SHAPING_SCRIPT_RE = re.compile(
+    "["
+    "\u0590-\u05FF"  # Hebrew
+    "\u0600-\u06FF"  # Arabic
+    "\u0700-\u074F"  # Syriac
+    "\u0750-\u077F"  # Arabic Supplement
+    "\u07C0-\u07FF"  # N'Ko
+    "\u08A0-\u08FF"  # Arabic Extended-A
+    "\uFB50-\uFDFF"  # Arabic Presentation Forms-A
+    "\uFE70-\uFEFF"  # Arabic Presentation Forms-B
+    "]"
+)
+
+# Emoji bases, symbols, arrows, dingbats and pictographs live at U+2190 and
+# above (❤ U+2764, ✅ U+2705, 👨 U+1F468, skin tones U+1F3FB, ...). A ZWJ or
+# variation selector after one of these is an emoji sequence, not a hidden
+# control. Nothing an LLM prompt legitimately needs sits below that line
+# paired with a joiner/selector.
+def _is_emoji_context(char: str) -> bool:
+    return ord(char) >= 0x2190
+
+
+# Letters where a glued-on variation selector has no typographic meaning.
+_LATIN_CYRILLIC_GREEK_RE = re.compile("[A-Za-z\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff]")
+
+
+def _is_cjk(char: str) -> bool:
+    cp = ord(char)
+    return 0x3400 <= cp <= 0x4DBF or 0x4E00 <= cp <= 0x9FFF or 0xF900 <= cp <= 0xFAFF
+
+
+def _suspicious_at(line: str, pos: int) -> bool:
+    """Context-aware check: is the character at line[pos] a hidden control?
+
+    Presence-alone detection (pre-v2.6.1) flagged ordinary Persian ZWNJ,
+    emoji sequences (👨‍👩‍👧, ❤️) and Arabic text using RLM/LRM. Those
+    characters stay suspicious OUTSIDE their legitimate context: a ZWJ
+    splitting a Latin keyword ("ig‍nore") still fires, as does every
+    zero-width space, bidi override, tag-block character and other
+    category-Cf format control.
+    """
+
+    char = line[pos]
+    cp = ord(char)
+    prev = line[pos - 1] if pos > 0 else ""
+    nxt = line[pos + 1] if pos + 1 < len(line) else ""
+
+    if cp in (0x200C, 0x200D):  # ZWNJ / ZWJ
+        legit = (
+            (prev and _SHAPING_SCRIPT_RE.match(prev))
+            or (nxt and _SHAPING_SCRIPT_RE.match(nxt))
+            or (cp == 0x200D and prev and _is_emoji_context(prev))
+        )
+        return not legit
+    if cp in (0x200E, 0x200F, 0x061C):  # LRM / RLM / ALM
+        # Direction marks on a line that contains shaping-script characters
+        # are line-level layout (e.g. RLM after punctuation in Arabic prose;
+        # ALM U+061C is the Arabic-letter mark of the same family), not
+        # obfuscation — second and third review rounds. The character itself
+        # is excluded from the search: ALM sits INSIDE the Arabic block
+        # (U+061C), so counting it would make every ALM "legitimate".
+        rest = line[:pos] + line[pos + 1:]
+        return not _SHAPING_SCRIPT_RE.search(rest)
+    if cp in (0xFE0E, 0xFE0F):  # text/emoji presentation selectors
+        # Legit after emoji bases (handled above, cp >= 0x2190) and after
+        # digits / symbols for keycap and trademark sequences (1️⃣, ™️).
+        # Suspicious only when glued to a Latin/Cyrillic/Greek letter, where
+        # an invisible selector has no typographic purpose.
+        return bool(prev and _LATIN_CYRILLIC_GREEK_RE.match(prev))
+    if 0xFE00 <= cp <= 0xFE0D:  # remaining variation selectors
+        return True
+    if 0xE0100 <= cp <= 0xE01EF:  # supplementary variation selectors
+        return not (prev and _is_cjk(prev))
+    return cp in SUSPICIOUS_UNICODE_CODEPOINTS or unicodedata.category(char) == "Cf"
+
+
 def suspicious_unicode_lines(text: str) -> List[int]:
     """Return 1-based source lines containing suspicious invisible controls."""
 
     return [
         index
         for index, line in enumerate(text.splitlines(), start=1)
-        if any(_is_suspicious_invisible(char) for char in line)
+        if any(_suspicious_at(line, pos) for pos in range(len(line)))
     ]
 
 

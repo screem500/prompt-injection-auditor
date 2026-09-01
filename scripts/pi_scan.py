@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 if __package__:  # Imported as scripts.pi_scan during tests or library use.
     from .language_rules import (
         ARABIC_AUTOLOAD_PATTERNS,
+        ARABIC_CONFIRM_GATE_PATTERNS,
         ARABIC_DEFENSIVE_CONTEXT_PATTERNS,
         ARABIC_HIERARCHY_PATTERNS,
         ARABIC_INGEST_KEYWORDS,
@@ -42,6 +43,7 @@ if __package__:  # Imported as scripts.pi_scan during tests or library use.
 else:  # Direct execution: python scripts/pi_scan.py ...
     from language_rules import (  # type: ignore
         ARABIC_AUTOLOAD_PATTERNS,
+        ARABIC_CONFIRM_GATE_PATTERNS,
         ARABIC_DEFENSIVE_CONTEXT_PATTERNS,
         ARABIC_HIERARCHY_PATTERNS,
         ARABIC_INGEST_KEYWORDS,
@@ -240,7 +242,17 @@ TOOL_NEGATION_CONTEXT = [
 TOOL_RISK_KEYWORDS = [
     (r"(?i)send (an? )?(email|message|sms)", "Outbound messaging capability"),
     (r"(?i)(execute|run) (code|commands?|scripts?|shell)", "Code/command execution capability"),
-    (r"(?i)(delete|remove|drop|truncate) ", "Destructive action capability"),
+    # Destructive requires a verb AND a consequential object. The pre-v2.6.1
+    # pattern matched the verb alone, so refactoring vocabulary ("remove
+    # unused imports", "drop a column" docs) reported a destructive
+    # capability and fed PI-NO-CONFIRM-GATE. Up to three intermediate words
+    # (commas and apostrophes tolerated — "delete, archive, or forward
+    # messages", "remove the customer's account") keep the recall while
+    # still excluding "remove unused imports and dead code".
+    (r"(?i)\b(delete|remove|drop|truncate)\w*,?(?:[ \t]+[\w'-]+,?){0,3}[ \t]+"
+     r"(files?|documents?|records?|rows?|tables?|databases?|db|data|emails?|"
+     r"messages?|inbox|users?|accounts?|director(?:y|ies)|folders?|logs?|"
+     r"backups?)\b", "Destructive action capability"),
     (r"(?i)\b(purchase|purchases|paying|pay for|transfers?|wire|checkout)\b", "Financial action capability"),
     (r"(?i)(http[s]? request|api call|fetch|browse|webhook)", "Network/egress capability"),
     (r"(?i)(read|access|retrieve) .{0,30}(file|document|email|drive|database)", "Sensitive data access"),
@@ -302,27 +314,139 @@ MEMORY_GUARD_PATTERN = r"(?i)(memory integrity|signed memory|memory provenance|r
 SUPPLY_CHAIN_FETCH_PATTERN = r"(?i)(npm install|pip install|npx |yarn add|go get|cargo add|git clone|clone the repo|download the package|fetch the package|add (a |the )?dependency)"
 SUPPLY_CHAIN_MODEL_NAMED_PATTERN = r"(?i)(the (real|official|correct) (package|library|repo|module)|whatever package (fits|is needed)|install the right (package|library)|packages? (you|the model|the agent) (think|believe|decide|deem)|any (package|library|dependency) (you |it )?(need|require)|(?:packages?|librar(?:y|ies)|dependenc(?:y|ies))[a-z ,]{0,20}(?:as|if) needed|determine which (package|library))"
 
+# PI-NO-CONFIRM-GATE (v2.6.0): a consequential capability (send / delete /
+# pay / publish / deploy) declared with no confirmation, staging, or stop
+# rule anywhere in the prompt. Incident anchor: the OpenClaw inbox-deletion
+# incident (2026-02-23, OWASP GenAI Exploit Round-up Q1 2026) — an agent
+# deleted live email and ignored stop commands with no software vulnerability
+# involved, only a missing gate. The 2026 defense literature (CaMeL and the
+# reference-monitor family; Five Eyes joint guidance on agentic AI, May 2026)
+# converges on the same control: a deterministic human gate before
+# consequential actions. The scanner can only verify the gate is *stated*;
+# enforcement must live outside the model.
+#
+# Consequential capabilities reuse the labels PI-TOOLS already detects
+# (bilingual, negation- and app-context-aware) so the two rules never
+# disagree about what the prompt declares. Read-only capabilities
+# (network fetch, data access) are deliberately excluded: a gate on every
+# read would train users to click through the gate that matters.
+CONSEQUENTIAL_LABELS = {
+    "Outbound messaging capability",
+    "Destructive action capability",
+    "Financial action capability",
+    "Outbound messaging capability (Arabic)",
+    "Destructive action capability (Arabic)",
+    "Financial action capability (Arabic)",
+}
+# Publish/deploy surfaces are consequential too but are kept out of
+# TOOL_RISK_KEYWORDS on purpose: adding them there would change PI-TOOLS
+# behavior, and v2.6.0 is additive.
+CONSEQUENTIAL_EXTRA_PATTERN = (
+    # Up to three intermediate words (object, version, "e.g.") between the
+    # verb and its target — "deploy the app to production", "push the
+    # release branch to main", "publish e.g. drafts to the live site"
+    # (fourth review round, recall only).
+    r"(?i)((publish|post)\w*(?:[ \t]+[\w'.-]+){0,3}[ \t]+(to|on)[ \t]+"
+    r"(production|the[ \t]+(live[ \t]+)?(site|blog|store|channel|page|feed))"
+    r"|deploy\w*(?:[ \t]+[\w'.-]+){0,3}[ \t]+(?:to[ \t]+)?(production|prod\b|live\b)"
+    r"|(merge|push)\w*(?:[ \t]+[\w'.-]+){0,3}[ \t]+(?:to[ \t]+)?(main|master|production)\b)"
+)
+# The publish/deploy extra pattern fires only when the text addresses the
+# agent directly (second review round): descriptions of CI workflows or
+# human procedures ("the pipeline deploys to production") are not findings.
+AGENT_VOICE_PATTERN = r"(?i)\b(?:you|the agent|the assistant|your (?:job|role|task))\b"
+# Prose about CI/workflow automation is a description of the team's process,
+# not a capability grant to the agent — suppress it on the publish/deploy
+# pattern even when an agent-voice opener sits nearby (third review round).
+TOOL_WORKFLOW_CONTEXT_PATTERNS = [
+    r"(?i)\bci\b|\bcd\b|continuous (?:integration|deployment|delivery)",
+    r"(?i)\bpipeline\b|\bpull request\b|\bmerge request\b|\bworkflow\b",
+]
+CONFIRM_GATE_PATTERN = (
+    r"(?i)((ask|asks|require|requires|request|requests|obtain|get|await|wait for)"
+    r"[^.\n]{0,50}(user'?s?|human|explicit|my)\s+(confirmation|approval|consent|permission|sign[- ]?off)"
+    r"|(confirm|check|verify)\s+with\s+the\s+user\s+before"
+    r"|ask\s+(the\s+user\s+|me\s+)?(first|before)"
+    r"|before\s+(sending|deleting|paying|purchasing|publishing|deploying|transferring|executing)[^.\n]{0,50}(confirm|ask|approval|permission|consent)"
+    r"|(never|do not|don'?t)\s+(send|delete|pay|purchase|publish|deploy|transfer)[^.\n]{0,60}without\s+(?:\w+[ \t]+){0,2}(asking|confirmation|approval|consent|permission)"
+    r"|human[- ]in[- ]the[- ]loop"
+    r"|(require|requires|needs?)\s+(human|manual)\s+(review|approval|confirmation)"
+    r"|(two[- ]step|staged|reversible|undoable)\s+(delete|deletion|send|action)"
+    r"|dry[- ]run\s+first"
+    r"|(honou?r|obey|respect)\w*[^.\n]{0,30}stop\s+(command|request)"
+    r"|stop\s+(command|request)s?\s+(are|must\s+be|will\s+be)\s+(honou?red|obeyed|respected|executed\s+immediately))"
+)
 
-def find_lines(text, pattern, skip_context_patterns=None):
-    """Return 1-based matching lines, optionally excluding local safe contexts.
 
-    Suppression is evaluated around each candidate match rather than across the
-    entire line. This prevents an unrelated defensive phrase elsewhere on a long
-    line from hiding a real injection pattern.
+def find_lines(text, pattern, skip_context_patterns=None, require_context_patterns=None):
+    """Return 1-based matching lines, with local context gates.
+
+    Suppression (skip_context_patterns) is evaluated around each candidate
+    match rather than across the entire line. This prevents an unrelated
+    defensive phrase elsewhere on a long line from hiding a real injection
+    pattern. require_context_patterns is the inverse gate: a match counts
+    only when the same window also matches at least one required pattern
+    (used for the agent-voice requirement on publish/deploy findings).
     """
 
     rx = re.compile(pattern)
     skip_patterns = [re.compile(item) for item in (skip_context_patterns or [])]
+    require_patterns = [re.compile(item) for item in (require_context_patterns or [])]
     lines = []
     for index, line in enumerate(text.splitlines(), start=1):
         for match in rx.finditer(line):
             start = max(0, match.start() - 140)
             end = min(len(line), match.end() + 60)
             context = line[start:end]
-            if not any(skip.search(context) for skip in skip_patterns):
-                lines.append(index)
-                break
+            if any(skip.search(context) for skip in skip_patterns):
+                continue
+            if require_patterns:
+                # Required context is evaluated on the SENTENCE holding the
+                # match, not the wide window: a "You are a ..." opener must
+                # not license a third-person description two sentences later
+                # (third review round). The window above still governs
+                # suppression.
+                sentence = _sentence_around(line, match.start(), match.end())
+                if not any(req.search(sentence) for req in require_patterns):
+                    continue
+            lines.append(index)
+            break
     return lines
+
+
+_SENTENCE_ENDINGS = "!?\u061f\n"
+
+
+def _is_sentence_end(line, i):
+    """Sentence boundary at line[i]? A period counts only before whitespace
+    or the line edge — the dots in "1.2" and "e.g." must not cut the
+    sentence and eject an agent-voice opener (fourth review round)."""
+    ch = line[i]
+    if ch in _SENTENCE_ENDINGS:
+        return True
+    if ch == ".":
+        return i + 1 >= len(line) or line[i + 1] in " \t"
+    return False
+
+
+def _sentence_around(line, start, end):
+    """Return the sentence slice of `line` that contains [start, end).
+
+    Sentence boundaries are '.', '!', '?', the Arabic question mark and the
+    line edges — good enough for gating a context requirement, without
+    pulling in a tokenizer.
+    """
+    left = 0
+    for i in range(start - 1, -1, -1):
+        if _is_sentence_end(line, i):
+            left = i + 1
+            break
+    right = len(line)
+    for i in range(end, len(line)):
+        if _is_sentence_end(line, i):
+            right = i + 1
+            break
+    return line[left:right]
 
 
 def _has_any(text, patterns):
@@ -590,6 +714,47 @@ def scan(text):
                 "lines": fetch_lines,
                 "detail": "Attackers pre-register the fake package/repo names models reliably invent ('slopsquatting' — USENIX Security 2025, Spracklen et al.: 19.7% of model-recommended packages don't exist, 43% of fakes repeat every run), seed them with malicious code plus hidden injection, and wait for the agent to fetch the attacker copy.",
                 "fix": "Never install a model-produced identifier. Pin names and verify against a lockfile or known-good index before any install. (Checklist #27, #10, #17)",
+            })
+
+    # v2.6.0 — consequential actions declared with no confirmation gate.
+    consequential_lines = sorted(
+        {
+            line
+            for label, lines in tool_hits
+            if label in CONSEQUENTIAL_LABELS
+            for line in lines
+        }
+        | set(find_lines(text, CONSEQUENTIAL_EXTRA_PATTERN,
+                         TOOL_NEGATION_CONTEXT + TOOL_APP_CONTEXT_PATTERNS
+                         + TOOL_WORKFLOW_CONTEXT_PATTERNS,
+                         require_context_patterns=[AGENT_VOICE_PATTERN]))
+    )
+    if consequential_lines:
+        gate_present = (
+            bool(find_lines(text, CONFIRM_GATE_PATTERN))
+            or any(find_lines(normalized_ar, pattern)
+                   for pattern in ARABIC_CONFIRM_GATE_PATTERNS)
+        )
+        if not gate_present:
+            findings.append({
+                "id": "PI-NO-CONFIRM-GATE",
+                "severity": "Critical" if ingest_lines else "High",
+                "title": "Consequential actions (send/delete/pay/publish) declared with no confirmation or stop rule",
+                "lines": consequential_lines,
+                "detail": (
+                    "The prompt grants actions with real-world side effects and never states a "
+                    "confirmation, staging, or stop rule, so one misread instruction acts at full "
+                    "privilege. The OpenClaw inbox-deletion incident (2026-02-23, OWASP GenAI "
+                    "Exploit Round-up Q1 2026) needed no vulnerability — an agent asked to suggest "
+                    "deletions deleted the mail and ignored stop commands. Adaptive-attack research "
+                    "and the Five Eyes agentic-AI guidance (May 2026) converge on deterministic "
+                    "gates before consequential actions as the control that holds."
+                ),
+                "fix": (
+                    "State the gate in the prompt and enforce it outside the model: explicit user "
+                    "confirmation before every send/delete/pay/publish, staged or reversible "
+                    "destructive actions, and stop requests honored immediately. (Checklist #30, #10)"
+                ),
             })
 
     def missing(english_patterns, arabic_patterns, finding_id, severity, title, detail, fix):

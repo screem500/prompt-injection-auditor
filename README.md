@@ -9,7 +9,7 @@ Static scanner + attack catalog + defense checklist + authorized red-team payloa
 
 Works with Claude Code, Cursor, Kimi, and 20+ agents that support the open [Agent Skills](https://agentskills.io) standard.
 
-**Measured:** separation between hardened and vulnerable prompts improved from 8.3 to 40.6 points, with zero false positives on the hardened corpus. See [VALIDATION.md](VALIDATION.md).
+**Measured:** separation between hardened and vulnerable prompts improved from 8.3 to 43.3 points, with zero false positives on the hardened corpus. See [VALIDATION.md](VALIDATION.md).
 
 **Different target:** payload detectors ask "is this input an attack?"; this asks "does your prompt have the controls to blunt one?" Both use patterns — but a missing instruction hierarchy is missing regardless of how an attacker phrases the attempt.
 
@@ -85,32 +85,41 @@ Summary: Critical=2, High=4, Medium=2, Low=1
 
 A hardened prompt (hierarchy + non-disclosure + delimiters) scores **0/100 — HARDENED**.
 
+> **What the score means:** this is a static *hygiene* score — it measures whether the prompt states the right controls, not whether the deployed agent resists injection. A 0/100 prompt can still be attacked; adaptive attacks bypass in-band defenses at will (Nasr et al., arXiv 2510.09023). Treat 0/100 as "no static findings", then verify with live tests (SKILL.md, Step 4) and enforce the consequential-action gates outside the model.
+
 ## What's inside
 
 ```
 prompt-injection-auditor/
 ├── SKILL.md                        # 5-step audit methodology + ethics guardrails (v2.2.0)
 ├── scripts/
-│   ├── pi_scan.py                  # Zero-dependency static analyzer (17 rule IDs — see references/rule-inventory.md)
+│   ├── pi_scan.py                  # Zero-dependency static analyzer (18 rule IDs — see references/rule-inventory.md)
 │   ├── pi_shield.py                # v2.0: layered input defense (5 layers, scored decisions)
 │   ├── mcp_guard.py                # v2.2: MCP tool-response guard (JSON-aware)
 │   ├── normalization.py            # v2.1: Arabic normalization (diacritics, tatweel, letters)
 │   └── language_rules.py           # v2.1+: Arabic injection, context & runtime rules
 ├── tests/
 │   ├── test_shield.py              # 11-case suite proving the shield against evasion
-│   ├── test_mcp_guard.py           # 18-case MCP guard suite (v2.2)
+│   ├── test_mcp_guard.py           # 20-case MCP guard suite (v2.2)
 │   ├── test_runtime_rules.py       # 19-case 2026 agent-runtime rule suite (v2.2)
 │   ├── test_arabic_rules.py        # Arabic injection detection (v2.1)
 │   ├── test_normalization.py       # Arabic normalization unit tests (v2.1)
 │   ├── test_english_regression.py  # English regression guard
+│   ├── test_confirm_gate.py        # 14-case confirmation-gate suite (v2.6)
+│   ├── test_fp_regression.py       # 60-case false-positive regression suite (v2.6.1)
+│   ├── test_docs_sync.py           # doc-drift guard: inventory, bilingual twins, SKILL.md refs, test count (v2.6)
 │   └── test_cli.py                 # CLI end-to-end tests
+├── check_redactions.py            # pre-publish sweep: private paths, emails, live-looking credentials (v2.6.1)
+├── RELEASING.md                   # additive-only policy + release gate (English + Arabic, v2.6)
+├── .github/workflows/tests.yml    # CI: full suite (Linux + Windows, py3.8–3.12) + benchmark/redaction gate (v2.6)
 ├── VALIDATION.md                  # precision measurement: method, results, limits
 └── references/
     ├── attack-patterns.md          # Direct / indirect / encoding / exfiltration / multi-agent
     ├── attack-patterns-2026.md     # MCP poisoning / sandbox bypass / memory injection / slopsquatting
-    ├── rule-inventory.md           # All 17 rule IDs: severity behavior + checklist mapping
-    ├── defense-checklist.md        # 29 numbered hardening measures
+    ├── rule-inventory.md           # All 18 rule IDs: severity behavior + checklist mapping
+    ├── defense-checklist.md        # 30 numbered hardening measures
     ├── defense-architecture.md     # The 5-layer shield design + honest limits
+    ├── attack-landscape-2026-08.md # 2026 threat/defense research note (English; .ar.md twin in Arabic)
     └── test-payloads.md            # Escalation-ordered payloads for authorized live tests
 
 ```
@@ -123,6 +132,28 @@ prompt-injection-auditor/
 - `VALIDATION.md` — precision measurement: method, results, limits
 
 Run the full test suite with `python -m unittest discover tests`.
+
+### New in v2.6.1 — review-driven fixes and permanent gates
+
+A pre-tag review of the v2.6.0 candidate probed the rules with realistic text instead of claimed numbers; every reproduced finding is fixed, and three further review rounds added eleven more (`tests/test_fp_regression.py`, 60 cases):
+
+- **Destructive pairing**: PI-TOOLS / PI-NO-CONFIRM-GATE now require a consequential object — "remove unused imports" no longer reports a destructive capability; "delete records/files" still does.
+- **mcp_guard sanitized form** is built from the neutralized text: OSC 52 / terminal escapes and invisible tag characters no longer survive into the wrapped "safe" output; JSON stays parseable.
+- **pi_shield output fidelity**: the model-bound text keeps Cyrillic, Persian ZWNJ shaping and emoji sequences intact (new `sanitize_output()`), while scoring stays as aggressive as before.
+- **Context-aware unicode rule**: ❤️, 👨‍👩‍👧 and Persian/Arabic joiner typography no longer fire PI-UNICODE-OBFUSCATION; the same characters inside Latin keywords still do.
+- **Case-sensitive DAN**: a person named Dan is not a jailbreak (was WARN 35).
+- **Round 2**: publish/deploy findings require agent voice (CI-workflow descriptions stay quiet), destructive pairing tolerates commas/apostrophes, RLM/VS context extended to line level and keycap/trademark sequences, fullwidth ＜＞ delimiter forgeries neutralized in both wrappers, mcp_guard notes fire only on real change, and OSC 52 clipboard writes score to WARN.
+- **Round 3**: fullwidth tag *names* (＜／ｕｓｅｒ＿ｄａｔａ＞) neutralized via a length-preserving NFKC fold in both wrappers, dangerous terminal sequences (conceal SGR 8, OSC 8, REP floods, DCS) block in mcp_guard while SGR colors stay weightless, agent voice is sentence-scoped with CI/workflow suppression, ALM gets the line-level treatment, and deploy/publish accepts an object ("deploy the app to production") with version-number periods no longer splitting the gating sentence.
+- **Permanent gates**: `check_redactions.py` (private paths / emails / live-looking credentials), a CI `gate` job running the benchmark with a true separation gate, and a CHANGELOG test-count drift check. 201 tests.
+
+### New in v2.6 — confirmation-gate rule, CI, and the bilingual documentation policy
+
+- **`PI-NO-CONFIRM-GATE`** (rule 18): consequential actions (send / delete / pay / publish / deploy) declared with no confirmation, staging, or stop rule — High, Critical under untrusted ingestion. Anchored to the OpenClaw inbox-deletion incident (2026-02-23, OWASP GenAI Exploit Round-up Q1 2026) and the out-of-band defense literature. English + Arabic gate detection; checklist #30.
+- **Continuous integration**: the full suite now runs on every push and PR across Linux and Windows, Python 3.8–3.12, plus CLI smoke tests (`.github/workflows/tests.yml`).
+- **Documentation drift guard**: `tests/test_docs_sync.py` wires `check_rule_docs.py` into the test suite and adds two new checks — every Arabic twin document covers the same rule IDs as its English base, and every file `SKILL.md` names actually exists.
+- **Bilingual documentation policy**: English documents gain Arabic twins (`references/<name>.ar.md`), starting with the 2026 landscape research note. Twins may differ in wording, never in coverage — enforced by test.
+- **Additive-only release policy**: `RELEASING.md` (English + Arabic) — rule IDs are permanent, existing tests are never deleted, corpus scores move only with a named reason in the CHANGELOG.
+- **Research note**: `references/attack-landscape-2026-08.md` (+ Arabic twin) maps the 2026 threat and defense landscape onto this rule set with sources, and carries the backlog the roadmap below draws from.
 
 ### New in v2.2 — 2026 agent-runtime rules (scanner)
 
@@ -162,7 +193,7 @@ if result.decision == "BLOCK":
     ...  # reject before it reaches the model context
 ```
 
-Proven by an 18-case suite: `python -m unittest tests.test_mcp_guard`.
+Proven by a 20-case suite: `python -m unittest tests.test_mcp_guard`.
 
 Note: mcp_guard.py here is unrelated to General-Analysis/mcp-guard — the overlap is coincidental; ours is a JSON-level scanner for MCP configs and tool responses.
 
@@ -198,7 +229,10 @@ This skill is for **defensive auditing and authorized testing only**. Live injec
 - [x] 2026 agent-runtime detection rules — MCP tool poisoning, sandbox bypass, memory injection, slopsquatting (v2.2, English + Arabic)
 - [x] MCP tool-response guard (v2.2 — `mcp_guard.py`)
 - [ ] Detection rules for agent-framework CVEs (LangChain / Langflow / LangGraph)
-- [ ] Skill-file linter mode (dedicated `SKILL.md` lint pass before publishing to skills.sh)
+- [ ] Skill-file linter mode (dedicated `SKILL.md` lint pass before publishing to skills.sh) — mapped to OWASP Agentic Skills Top 10 (AST10); recall measured on `snyk-labs/toxicskills-goof` (see `references/attack-landscape-2026-08.md`)
+- [ ] `PI-EXTERNAL-INSTRUCTIONS` — instructions fetched from a URL and followed (AST05; Air Security, June 2026)
+- [ ] `PI-DROPPER` — pipe-to-shell / encoded droppers across the whole package, not only SKILL.md (ClawHavoc-class)
+- [ ] mcp_guard tool-description pinning — rug-pull detection via baseline hashes (OWASP MCP03)
 - [ ] HTML report output
 - [ ] SARIF export for GitHub Code Scanning
 

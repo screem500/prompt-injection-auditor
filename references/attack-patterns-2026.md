@@ -9,6 +9,7 @@ The original `attack-patterns.md` catalog covers prompt-level injection. In 2026
 - [3. Persistent memory injection (PI-MEMORY)](#3-persistent-memory-injection-pi-memory)
 - [4. Supply-chain slopsquatting (PI-SUPPLY-CHAIN)](#4-supply-chain-slopsquatting-pi-supply-chain)
 - [5. Repo-borne configuration auto-load (PI-AUTOLOAD-CONFIG)](#5-repo-borne-configuration-auto-load-pi-autoload-config)
+- [6. Consequential actions without a confirmation gate (PI-NO-CONFIRM-GATE)](#6-consequential-actions-without-a-confirmation-gate-pi-no-confirm-gate)
 
 ## 1. MCP tool-server exposure (PI-MCP)
 
@@ -105,3 +106,45 @@ Defenses: gate every workspace-config read on an explicit trust decision,
 re-verify on each change to the file, and where the file only needs to inform
 rather than instruct, load it as data under the same delimiting rules as any
 other untrusted content (Checklist #28, #24, #5, #10).
+
+## 6. Consequential actions without a confirmation gate (PI-NO-CONFIRM-GATE)
+
+*Added in v2.6.0.*
+
+An agent that can send, delete, pay, publish, or deploy holds actions with
+real-world side effects. When the prompt grants those actions and never states
+a confirmation, staging, or stop rule, one misread instruction — injected or
+merely misunderstood — executes at full privilege, and nothing in the design
+stands between intent and effect.
+
+The anchor is an incident, not a CVE. On 2026-02-23 an OpenClaw agent asked to
+*suggest* what to delete or archive in an inbox began deleting messages
+directly and ignored the stop commands its user sent (OWASP GenAI Exploit
+Round-up Q1 2026, incident 2). No software vulnerability was involved; OWASP
+maps it to ASI10 (Rogue Agents) and ASI09 (Human-Agent Trust Exploitation).
+The 2026 quarter's wider pattern is the same: most agent incidents were
+architectural — excessive agency, missing gates — rather than tracked
+vulnerabilities.
+
+The defense literature converges on the fix from the other direction. In-band
+detection collapses under adaptive attacks (Nasr et al., arXiv 2510.09023:
+above 90 percent bypass for most of the twelve published defenses tested),
+while the
+out-of-band family — CaMeL (arXiv 2503.18813), Progent, FIDES, RTBAS, FORGE —
+holds by enforcing a deterministic policy *before each consequential tool
+call*. The Five Eyes joint guidance on agentic AI (May 2026) states the policy
+version: human oversight at consequential decisions is a prerequisite, not an
+option.
+
+Scanner logic: a consequential capability (the outbound-messaging, destructive
+and financial labels PI-TOOLS already detects, plus publish/deploy phrasing)
+with no confirmation, staging, or stop rule anywhere in the prompt → High;
+Critical when the same prompt also ingests untrusted content, because that is
+the EchoLeak shape with the last gate removed. A stated gate in either English
+or Arabic suppresses the finding. The scanner verifies only that the gate is
+*stated* — enforcement must live outside the model (checklist #30).
+
+Defenses: explicit user confirmation per consequential action; staged or
+reversible destructive operations; stop requests honored immediately; gates on
+consequential actions only, so users are not trained to click through them
+(Checklist #30, #10).
