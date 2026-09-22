@@ -183,6 +183,31 @@ def escape_delimiters(text):
 # Layer 3 — Scored pattern detection
 # ---------------------------------------------------------------------------
 
+# --- v2.6.2: incident-driven families ---------------------------------------
+# Environment-variable poisoning (Cursor CVE-2026-22708, fixed in 2.3):
+# injected text tells the agent to set a shell-startup or hook variable so
+# the NEXT benign command executes the payload — "export PAGER=..." turns a
+# later "git branch" into code execution, and the allowlist never sees it
+# because export/typeset/declare are trusted shell builtins. CORE vars are
+# code-exec primitives that essentially never appear in legitimate content;
+# HOOK vars (editors, pagers, runtime option strings) occasionally do, so
+# they only count when an explicit assignment verb drives them.
+ENV_CORE_VARS = (
+    "LD_PRELOAD|DYLD_INSERT_LIBRARIES|BASH_ENV|PROMPT_COMMAND|PS4|"
+    "GIT_SSH_COMMAND|GIT_EXTERNAL_DIFF|GIT_CONFIG_COUNT|PERL5OPT|"
+    "PYTHONSTARTUP|PYTHONINSPECT|LESSOPEN|LESSCLOSE"
+)
+ENV_HOOK_VARS = (
+    "PAGER|GIT_PAGER|GIT_EDITOR|EDITOR|VISUAL|BROWSER|PYTHONWARNINGS|"
+    "PERL5LIB|RUBYOPT|RUBYLIB|NODE_OPTIONS|LD_LIBRARY_PATH|"
+    "DYLD_PRINT_LIBRARIES|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|ENV"
+)
+ENV_VERB_RE = (
+    r"\b(?:export|setenv|setx?|declare|typeset)(?:\s+-[a-zA-Z]{1,3})?\s+"
+    r"(?:" + ENV_CORE_VARS + "|" + ENV_HOOK_VARS + r")\s*="
+)
+ENV_CORE_RE = r"\b(?:" + ENV_CORE_VARS + r")\s*="
+
 # (regex, weight, label). Weights accumulate into a 0-100 threat score.
 PATTERNS = [
     (r"\bignore\s+(all\s+|any\s+|the\s+)?(previous|prior|above|earlier|preceding)\b", 60, "instruction override"),
@@ -195,7 +220,31 @@ PATTERNS = [
     (r"\bi am (the )?(developer|admin|creator|owner|an? openai)\b", 25, "authority spoofing"),
     (r"\bno (restrictions|guidelines|rules)\b|\bjailbreak\b", 35, "jailbreak attempt"),
     (r"\bnew (directive|instruction|rule)s?\s*[:=]", 25, "directive injection"),
+    # v2.6.2 — environment-variable poisoning (see ENV_* above). Weights
+    # stack like the other families: a bare core assignment warns (35), the
+    # verb-driven instruction shape warns higher (45), and both together —
+    # "export LD_PRELOAD=..." — cross the block threshold (80). Hook vars
+    # with a verb (export EDITOR=vim) warn once; bare hook mentions
+    # (NODE_OPTIONS=--max-old-space-size in a pasted log) stay silent.
+    (ENV_VERB_RE, 45, "environment-variable poisoning"),
+    (ENV_CORE_RE, 35, "environment-variable poisoning"),
+    # v2.6.2 — concealment: the payload orders the agent to hide its actions
+    # from the user (the silent half of the Gemini calendar-invite attack,
+    # January 2026, and of every masquerade payload since).
+    (r"\b(?:do\s+not|don'?t|never)\s+(?:inform|tell|notify|alert|warn)\s+(?:the\s+)?user\b", 40, "concealment instruction"),
+    (r"\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?user\b", 40, "concealment instruction"),
+    (r"\b(?:hide|keep|conceal)\b[^\n]{0,30}\bfrom\s+(?:the\s+)?user\b", 35, "concealment instruction"),
+    # v2.6.2 — markdown image with a query-bearing URL, scheme optional:
+    # the EchoLeak exfiltration markup, including the protocol-relative
+    # "//host" form that bypasses scheme checks (GrafanaGhost, 2026).
+    (r"!\[[^\]]*\]\(\s*(?:https?:)?//[^)\s]*[?=&]", 45, "markdown exfiltration channel"),
 ]
+
+# Model-output channels (Layer 5 companion, v2.6.2). The query-bearing form
+# is the exfiltration channel; the bare protocol-relative form carries no
+# data but is still a render callback to an attacker-chosen host.
+_MD_IMG_QUERY_RE = re.compile(r"!\[[^\]]*\]\(\s*(?:https?:)?//[^)\s]*[?=&]")
+_MD_IMG_BARE_PROTOREL_RE = re.compile(r"!\[[^\]]*\]\(\s*//[^)\s?=&]*\)")
 
 # Case-sensitive patterns: the DAN acronym ("Do Anything Now") is all-caps.
 # Matching it case-insensitively flagged every input mentioning a person
@@ -349,6 +398,35 @@ def check_output(model_output, canaries):
     canaries (empty = clean).
     """
     return [c for c in canaries if c in model_output]
+
+
+def check_output_channels(model_output):
+    """Flag exfiltration channels in model OUTPUT before it is rendered.
+
+    check_output() watches for planted canaries; this watches for the
+    rendering channels that carry data out on their own (v2.6.2):
+
+    * markdown images whose URL query string can smuggle data to a remote
+      host — the EchoLeak pattern — including the protocol-relative
+      "//host" form that bypasses scheme allowlists (GrafanaGhost);
+    * bare protocol-relative images, which carry no query but are still a
+      render callback to an attacker-chosen host.
+
+    Returns a list of human-readable findings (empty = clean). Callers gate
+    rendering on it the same way they gate on canary leaks.
+    """
+    findings = []
+    for match in _MD_IMG_QUERY_RE.finditer(model_output):
+        findings.append(
+            "markdown image with query-bearing URL (exfiltration channel): "
+            + match.group(0)[:80]
+        )
+    for match in _MD_IMG_BARE_PROTOREL_RE.finditer(model_output):
+        findings.append(
+            "protocol-relative markdown image (render callback): "
+            + match.group(0)[:80]
+        )
+    return findings
 
 
 # ---------------------------------------------------------------------------

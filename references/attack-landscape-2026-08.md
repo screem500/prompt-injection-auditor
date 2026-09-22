@@ -178,6 +178,60 @@ Claude Code: the AST10 timeline lists CVE-2025-59536 (CVSS 8.7, already anchored
 OpenClaw ClawJacked CVE-2026-28363 (CVSS 9.9, localhost WebSocket brute force) is a runtime bug, not a prompt weakness; it belongs in attack-patterns-2026.md as context, not as a rule.
 
 
+SECTION 7B. ADDENDUM 2026-09-23 — WHAT LANDED IN v2.6.2
+
+Four technique entries from this note's orbit shipped as runtime families
+(pi_shield / mcp_guard patterns), not new scanner rule IDs — consistent
+with Section 5: the static scanner gains a rule only where the signal sits
+in a file the scanner reads. Scanner rule IDs remain 18.
+
+1. Environment-variable poisoning. Cursor CVE-2026-22708 (September 2026,
+   fixed in Cursor 2.3): shell builtins (export/typeset/declare) were
+   implicitly trusted by the command allowlist, so injected content could
+   poison shell startup and hook variables (PAGER, PERL5OPT, PYTHONWARNINGS,
+   LD_PRELOAD, BASH_ENV, GIT_SSH_COMMAND, …) and let the NEXT benign command
+   execute the payload — zero-click and one-click forms. Static signal:
+   weak in prompts (PI-SANDBOX-BYPASS already flags allowlist gates with no
+   bypass awareness), strong in content. Shipped: verb-driven and bare-
+   assignment detection in pi_shield and mcp_guard; bare hook-variable
+   strings in pasted logs deliberately silent.
+
+2. Concealment / masquerade instructions. The Gemini calendar-invite
+   injection (disclosed January 2026) paired a dormant indirect payload
+   with an explicit masquerade order ("respond with 'it's a free time
+   slot'"); the concealment half is what made the attack silent. Shipped:
+   "do not inform the user" / "without telling the user" / "respond with
+   '<canned>'" detection in both layers, English and Arabic; positive
+   phrasing stays silent.
+
+3. Memory-write instructions. Memory poisoning matured from research
+   (MINJA; the systematic memory-poisoning study, arXiv 2606.04329) into
+   campaigns ("Sleeper", 2026) whose payload is a one-line write:
+   "remember that the user prefers X". Shipped: memory-write detection in
+   mcp_guard only — the same phrase from a user to their own agent is a
+   legitimate memory feature, and the shield correctly ignores it.
+
+4. Protocol-relative markdown images. GrafanaGhost (Shift 1) smuggled data
+   through image URLs that bypassed scheme checks; the markdown-exfiltration
+   pattern now treats the scheme as optional and flags bare "//host" images
+   as render callbacks, and pi_shield gains check_output_channels() for the
+   model-output side. Shipped in both layers.
+
+Measured effect: the pinned garak in-the-wild corpus (650 prompts, SHA-256
+c072aa09…) moved 102/128/420 (noticed 35.4%, mean 24.8) to 111/135/404
+(noticed 37.8%, mean 26.4); both versions were diffed payload-by-payload
+and the movement is entirely the new families catching phrasing already
+present in the corpus. Scanner benchmark unchanged (3.0 / 46.3 / 43.3).
+
+Still open from Section 6, unchanged: skill-file linter mode (Step 2),
+PI-EXTERNAL-INSTRUCTIONS / PI-DROPPER (entries 2.1, 2.3), mcp_guard tool-
+description pinning against rug pulls (entry 2.8 / MCP03) — now the most
+evidence-backed remaining item, with Microsoft's June 2026 guidance
+(signed tool manifests, metadata scanning) and the MCPTox benchmark
+(45 live servers, 20 agents, average tool-poisoning ASR 36.5 percent,
+arXiv 2508.14925) as the measurement baseline to beat.
+
+
 SECTION 8. SOURCES
 
 (P) OWASP GenAI Exploit Round-up Report Q1 2026, April 14, 2026: https://genai.owasp.org/2026/04/14/owasp-genai-exploit-round-up-report-q1-2026/
@@ -198,3 +252,10 @@ SECTION 8. SOURCES
 (S) Sysdig, The Comprehensive Guide to Prompt Injection Attacks in 2026: https://www.sysdig.com/learn-cloud-native/prompt-injection
 (S) Cycode, OWASP MCP Top 10 guide, June 24, 2026: https://cycode.com/blog/owasp-mcp-top-10/
 (S) Practical DevSecOps, MCP Security Statistics 2026: https://www.practical-devsecops.com/mcp-security-statistics-2026-report/
+
+Addendum sources (Section 7B):
+(P) Cursor security bulletin / public CVE record, CVE-2026-22708 (shell builtins implicitly trusted; environment-variable poisoning; fixed in 2.3), September 2026
+(P) MCPTox: A Benchmark for Tool Poisoning Attack on Real-World MCP Servers, arXiv 2508.14925: https://arxiv.org/html/2508.14925v1
+(P) Gemini calendar-invite indirect prompt injection disclosure (dormant payload + masquerade instruction), January 2026
+(S) Systematic study of memory poisoning in LLM agents, arXiv 2606.04329, June 2026; "Sleeper" memory-poisoning campaign reporting, 2026
+(S) CSA research note, MCP Attack Surface: Tool Poisoning and IDE Auto-Execution, July 1, 2026: https://labs.cloudsecurityalliance.org/research/csa-research-note-mcp-tool-poisoning-auto-execution-20260701/

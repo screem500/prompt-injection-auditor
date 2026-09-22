@@ -119,8 +119,8 @@ Severity guide:
 
 ### scripts/
 - `pi_scan.py` — Static analyzer for system prompts and instruction files. No dependencies; Python 3.8+. Covers the prompt-level classes and the 2026 agent-runtime classes (`PI-MCP`, `PI-SANDBOX-BYPASS`, `PI-MEMORY`, `PI-SUPPLY-CHAIN`, `PI-AUTOLOAD-CONFIG`), English and Arabic. Outputs findings with line numbers, risk score, and optional JSON/Markdown reports.
-- `pi_shield.py` — Layered prompt-injection *defense* (v2.0): normalization, safe delimiting with closing-tag neutralization, scored detection, encoded-payload inspection, canary output check. Use when the user wants to add input protection to an agent, not just audit it.
-- `mcp_guard.py` — MCP tool-response guard (v2.2): scans tool responses (JSON-aware, JSON-path findings) and tool definitions for indirect injection — special tokens, fake consent, tool-call manipulation, exfiltration channels, hidden channels, encoded and Arabic payloads. Use when auditing or hardening agents that ingest tool output.
+- `pi_shield.py` — Layered prompt-injection *defense* (v2.0): normalization, safe delimiting with closing-tag neutralization, scored detection, encoded-payload inspection, canary output check. v2.6.2 adds environment-variable-poisoning and concealment families plus `check_output_channels()` — exfiltration-markup detection on model output (query-bearing or protocol-relative markdown images). Use when the user wants to add input protection to an agent, not just audit it.
+- `mcp_guard.py` — MCP tool-response guard (v2.2): scans tool responses (JSON-aware, JSON-path findings) and tool definitions for indirect injection — special tokens, fake consent, tool-call manipulation, exfiltration channels, hidden channels, encoded and Arabic payloads. v2.6.2 adds environment-variable poisoning (Cursor CVE-2026-22708), memory-write instructions (English + Arabic), concealment/masquerade instructions, and protocol-relative markdown images; finding families shared with pi_shield count once per chunk at the highest weight. Use when auditing or hardening agents that ingest tool output.
 - `normalization.py` — Arabic normalization (v2.1): diacritics, tatweel, letter forms. Used by pi_scan, pi_shield and mcp_guard.
 - `language_rules.py` — Arabic injection, context and runtime rules (v2.1+). Used by pi_scan and mcp_guard.
 
@@ -133,7 +133,7 @@ All suites run with `python -m unittest tests.<module>`. Run the full set after 
 - `test_arabic_rules.py` — Arabic injection detection (v2.1).
 - `test_normalization.py` — Arabic normalization unit tests (v2.1).
 - `test_english_regression.py` — English regression guard.
-- `test_fp_regression.py` — 60 false-positive regression cases (v2.6.1, four review rounds): destructive pairing and punctuation tolerance, unicode context (character and line level, ALM), shield output fidelity, case-sensitive DAN, mcp_guard sanitized form / notes / OSC 52 / dangerous ANSI, agent-voice gate (sentence-scoped, workflow suppression, deploy-object recall), fullwidth delimiters and tag names.
+- `test_fp_regression.py` — 93 false-positive regression cases (v2.6.2): destructive pairing and punctuation tolerance, unicode context (character and line level, ALM), shield output fidelity, case-sensitive DAN, mcp_guard sanitized form / notes / OSC 52 / dangerous ANSI, agent-voice gate (sentence-scoped, workflow suppression, deploy-object recall), fullwidth delimiters and tag names, and the v2.6.2 incident families (environment-variable poisoning, memory-write, concealment/masquerade, protocol-relative markdown images).
 - `test_cli.py` — CLI end-to-end tests.
 
 ### references/

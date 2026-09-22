@@ -12,7 +12,14 @@ On top of pi_shield's five layers, this guard catches tool-channel attacks:
     (<|im_start|>, <<SYS>>, [INST], <system> ...)
   * fake user consent ("the user has approved — proceed with deleting ...")
   * tool-call manipulation ("call the send_email tool", inline tool_call JSON)
-  * exfiltration channels (markdown images with query strings, webhook hosts)
+  * exfiltration channels (markdown images with query strings — including
+    the protocol-relative "//host" form — webhook hosts)
+  * environment-variable poisoning (shell startup/hook variables a tool
+    tells the agent to export so the next benign command runs the payload)
+  * memory-write instructions ("remember that the user prefers X" — the
+    MINJA / Sleeper memory-poisoning shape, English and Arabic)
+  * concealment / masquerade instructions ("do not inform the user",
+    "respond with 'everything is fine'")
   * hidden channels (unicode tag block, HTML comments with instructions)
   * Arabic injection phrases (reuses the v2.1 language rules)
   * encoded payloads (base64/hex blobs, decoded then scanned)
@@ -38,10 +45,12 @@ from dataclasses import dataclass, field
 try:
     from scripts.pi_shield import (
         normalize, sanitize_output, score_patterns, scan_encoded, _fold_probe,
+        ENV_VERB_RE, ENV_CORE_RE,
     )
 except ImportError:  # direct execution: python scripts/mcp_guard.py
     from pi_shield import (
         normalize, sanitize_output, score_patterns, scan_encoded, _fold_probe,
+        ENV_VERB_RE, ENV_CORE_RE,
     )
 
 # Arabic support is optional at import time so older checkouts still run.
@@ -91,9 +100,53 @@ MCP_PATTERNS = [
     (r"\b(?:tool_call|function_call)\b|\"name\"\s*:\s*\"(?:send_|delete_|transfer_|exec)", 30, "tool-call manipulation"),
 
     # Exfiltration channels — markdown images/links whose URL query string can
-    # carry stolen data to an attacker host (the EchoLeak pattern).
-    (r"!\[[^\]]*\]\(\s*https?://[^)\s]*[?=&]", 60, "markdown exfiltration channel"),
+    # carry stolen data to an attacker host (the EchoLeak pattern). The scheme
+    # is optional since v2.6.2: the protocol-relative "//host" form bypasses
+    # scheme allowlists (GrafanaGhost). A bare protocol-relative image carries
+    # no query but is still a render callback, so it warns.
+    (r"!\[[^\]]*\]\(\s*(?:https?:)?//[^)\s]*[?=&]", 60, "markdown exfiltration channel"),
+    (r"!\[[^\]]*\]\(\s*//[^)\s?=&]*\)", 30, "protocol-relative markdown image (render callback)"),
     (r"https?://[^\s)\]]*(?:webhook\.site|requestbin|hookbin|ngrok|canarytokens|burpcollaborator|oastify|interact\.sh|pipedream)", 60, "known exfiltration endpoint"),
+
+    # Environment-variable poisoning (v2.6.2; Cursor CVE-2026-22708, fixed in
+    # 2.3): tool data tells the agent to set a shell startup/hook variable so
+    # the NEXT benign command executes the payload — export/typeset/declare
+    # are trusted builtins, so the allowlist never sees the assignment. The
+    # verb-driven form is the instruction shape (+45); a bare core-variable
+    # assignment in the data warns (+40) and the two stack. Patterns are
+    # shared with pi_shield so both layers see the same variable set.
+    (ENV_VERB_RE, 45, "environment-variable poisoning"),
+    (ENV_CORE_RE, 40, "environment-variable poisoning"),
+
+    # Memory-write instructions (v2.6.2; MINJA and the Sleeper memory-
+    # poisoning campaigns): tool data orders the agent to persist attacker
+    # text into long-term memory, where it replays with system-prompt
+    # authority in every future session. "remember that …" alone is weak
+    # evidence (documentation says it too), so it warns only in combination;
+    # the explicit forms ("commit to memory", "from now on always") warn on
+    # their own. Arabic forms are matched on the normalized view.
+    (r"\bremember\s+(?:that|this|these)\b", 25, "memory-write instruction"),
+    (r"\bfrom\s+now\s+on\b[^\n]{0,40}\b(?:always|remember|treat|use|do|never|consider)\b", 30, "memory-write instruction"),
+    (r"\b(?:in|for)\s+future\s+(?:sessions?|conversations?|interactions?|reference)\b", 30, "memory-write instruction"),
+    (r"\bcommit\s+(?:this|it|that|these)\s+to\s+(?:your\s+)?memory\b", 40, "memory-write instruction"),
+    (r"\bupdate\s+your\s+(?:memory|records|knowledge|notes|preferences|beliefs)\b", 35, "memory-write instruction"),
+    (r"\u062a\u0630\u0643\u0631\s+(?:\u0627\u0646|\u0647\u0630\u0627|\u0647\u0630\u0647)\b", 25, "memory-write instruction"),
+    (r"\u0645\u0646\s+\u0627\u0644\u0627\u0646\s+\u0641\u0635\u0627\u0639\u062f\u0627", 30, "memory-write instruction"),
+    (r"(?:\u0627\u062d\u0641\u0638|\u062e\u0630\u0646|\u0633\u062c\u0644)\b[^\n]{0,40}(?:\u0630\u0627\u0643\u0631\u062a|\u0630\u0643\u0631\u0649|\u0645\u0644\u0627\u062d\u0638\u0627\u062a)", 40, "memory-write instruction"),
+
+    # Concealment / masquerade (v2.6.2; Gemini calendar-invite injection,
+    # January 2026): the payload's second half orders the agent to hide the
+    # action and hand the user a canned harmless answer ("respond with 'it's
+    # a free time slot'"). The do-not-inform forms warn at +50; the canned-
+    # answer shape is weaker (API documentation quotes responses) so it only
+    # counts in combination.
+    (r"\b(?:do\s+not|don'?t|never)\s+(?:inform|tell|notify|alert|warn)\s+(?:the\s+)?user\b", 50, "concealment instruction"),
+    (r"\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?user\b", 50, "concealment instruction"),
+    (r"\b(?:hide|keep|conceal)\b[^\n]{0,30}\bfrom\s+(?:the\s+)?user\b", 45, "concealment instruction"),
+    (r"\btell\s+the\s+user\s+(?:that\s+)?(?:everything|all|it)\s+is\s+(?:fine|ok(?:ay)?|normal|safe)\b", 45, "masquerade instruction"),
+    (r"\b(?:respond|reply|answer)\s+with\s+['\"]", 25, "masquerade instruction"),
+    (r"(?:\u0644\u0627\s+\u062a\u062e\u0628\u0631|\u0644\u0627\s+\u062a\u0628\u0644\u063a|\u0644\u0627\s+\u062a\u0639\u0644\u0645|\u0644\u0627\s+\u062a\u062d\u0630\u0631)\s+\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", 50, "concealment instruction"),
+    (r"(?:\u062f\u0648\u0646|\u0628\u062f\u0648\u0646)\s+(?:\u0627\u062e\u0628\u0627\u0631|\u0625\u0628\u0644\u0627\u063a|\u0627\u0628\u0644\u0627\u063a|\u0625\u0639\u0644\u0627\u0645|\u0627\u0639\u0644\u0627\u0645)\s+\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", 50, "concealment instruction"),
 
     # Hidden instruction channels.
     (r"<!--[^>]*(?:ignore|instruction|system|prompt|secret|password|token|previous)[^>]*-->", 35, "hidden instruction in HTML comment"),
@@ -183,12 +236,31 @@ def _scan_chunk(text):
     base_score, hits = score_patterns(norm)
     score += base_score
     findings.extend(f"{label} (+{weight})" for label, weight in hits)
+    # A finding FAMILY (same label) never counts twice in one chunk: since
+    # v2.6.2 the base layer and MCP_PATTERNS share families (environment-
+    # variable poisoning, concealment, markdown exfiltration). When the MCP
+    # pattern is stricter, only the difference is added — the tool channel's
+    # stance still wins, but the family is scored once (same principle as
+    # the case-sensitive DAN dedup inside score_patterns).
+    base_by_label = {}
+    for label, weight in hits:
+        base_by_label[label] = max(base_by_label.get(label, 0), weight)
 
     # 3. MCP-specific patterns
     for pattern, weight, label in MCP_PATTERNS:
         if re.search(pattern, norm, _FLAGS):
-            findings.append(f"{label} (+{weight})")
-            score += weight
+            prev = base_by_label.get(label)
+            if prev is None:
+                findings.append(f"{label} (+{weight})")
+                score += weight
+            elif weight > prev:
+                findings.append(
+                    f"{label} (+{weight - prev} tool-channel escalation)"
+                )
+                score += weight - prev
+            # else: the base layer already counted this family at an equal
+            # or higher weight — the finding stands, the score does not
+            # double.
 
     # 4. Arabic injection rules
     if ARABIC_INJECTION_PATTERNS:

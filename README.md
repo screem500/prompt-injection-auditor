@@ -106,7 +106,7 @@ prompt-injection-auditor/
 │   ├── test_normalization.py       # Arabic normalization unit tests (v2.1)
 │   ├── test_english_regression.py  # English regression guard
 │   ├── test_confirm_gate.py        # 14-case confirmation-gate suite (v2.6)
-│   ├── test_fp_regression.py       # 60-case false-positive regression suite (v2.6.1)
+│   ├── test_fp_regression.py       # 93-case false-positive regression suite (v2.6.2)
 │   ├── test_docs_sync.py           # doc-drift guard: inventory, bilingual twins, SKILL.md refs, test count (v2.6)
 │   └── test_cli.py                 # CLI end-to-end tests
 ├── check_redactions.py            # pre-publish sweep: private paths, emails, live-looking credentials (v2.6.1)
@@ -132,6 +132,17 @@ prompt-injection-auditor/
 - `VALIDATION.md` — precision measurement: method, results, limits
 
 Run the full test suite with `python -m unittest discover tests`.
+
+### New in v2.6.2 — incident-driven runtime families
+
+Four new detection families in the runtime layers (`pi_shield` / `mcp_guard`), each anchored to a disclosed 2026 attack; the scanner's 18 rule IDs are unchanged (`tests/test_fp_regression.py`, 33 new cases):
+
+- **Environment-variable poisoning** (Cursor CVE-2026-22708): instructions to `export` shell startup/hook variables (PAGER, LD_PRELOAD, PERL5OPT, PYTHONWARNINGS, …) score in both layers — the payload that turns the next benign command into code execution. Bare hook-variable strings in pasted logs stay silent by design.
+- **Memory-write instructions** (MINJA / Sleeper memory poisoning): tool data saying "remember that…", "commit to memory", "from now on, always…" (English + Arabic) warns and stacks; the user's own "remember that I prefer…" request to their agent is not a finding.
+- **Concealment / masquerade** (Gemini calendar-invite injection, Jan 2026): "do not inform the user", "respond with 'everything is fine'" — the silence half of the payload — warns at +50 and stacks to a block; positive phrasing ("please inform the user") stays silent.
+- **Protocol-relative markdown images** (GrafanaGhost): `![](//host/x.png?d=…)` blocks like its https form; bare `//host` images warn as render callbacks; new `check_output_channels()` flags both in model output before rendering.
+- **Family dedup across guard layers**: a finding family counts once per chunk at its highest weight, with the tool-channel difference applied as escalation.
+- Re-measured on the pinned garak in-the-wild corpus (650 prompts): noticed **35.4% → 37.8%**, mean 24.8 → 26.4 — movement traced payload-by-payload to the new families, recorded in the CHANGELOG. Benchmark unchanged: 3.0 / 46.3 / 43.3. 234 tests.
 
 ### New in v2.6.1 — review-driven fixes and permanent gates
 
@@ -177,7 +188,10 @@ pi_shield guards the user-input boundary; **mcp_guard guards the tool boundary**
 - model special tokens smuggled into data (`<|im_start|>`, `<<SYS>>`, `<system>`, `<s>`)
 - fake user consent ("the user has approved — proceed with deleting…")
 - tool-call manipulation and dangerous-action endorsement
-- exfiltration channels (markdown images with query strings, webhook/collection hosts)
+- exfiltration channels (markdown images with query strings — scheme optional, so protocol-relative `//host` forms are caught — webhook/collection hosts)
+- environment-variable poisoning (v2.6.2: "export PAGER=…", `declare -x LD_PRELOAD=…` — Cursor CVE-2026-22708)
+- memory-write instructions (v2.6.2: "remember that…", "commit to memory", English + Arabic — MINJA/Sleeper)
+- concealment / masquerade instructions (v2.6.2: "do not inform the user", "respond with 'everything is fine'" — Gemini calendar-invite injection)
 - hidden channels (unicode tag block, HTML comments) and encoded payloads
 - Arabic injection phrases (reuses the v2.1 language rules)
 
@@ -199,7 +213,7 @@ Note: mcp_guard.py here is unrelated to General-Analysis/mcp-guard — the overl
 
 ### New in v2.0 — pi_shield (defense layer)
 
-The auditor finds weaknesses; **pi_shield blocks them**. A five-layer input-defense middleware: unicode/homoglyph normalization, safe delimiting with closing-tag neutralization, weighted threat scoring (ALLOW/WARN/BLOCK), base64/hex payload inspection, and canary leak detection. Defeats the evasion techniques that break naive filters — closing-tag escapes, zero-width characters, Cyrillic homoglyphs, encoded commands — proven by an 11-case test suite (`python -m unittest tests.test_shield`).
+The auditor finds weaknesses; **pi_shield blocks them**. A five-layer input-defense middleware: unicode/homoglyph normalization, safe delimiting with closing-tag neutralization, weighted threat scoring (ALLOW/WARN/BLOCK), base64/hex payload inspection, and canary leak detection. Defeats the evasion techniques that break naive filters — closing-tag escapes, zero-width characters, Cyrillic homoglyphs, encoded commands — proven by an 11-case test suite (`python -m unittest tests.test_shield`). Since v2.6.2 the scoring layer also covers environment-variable poisoning and concealment phrasing, and a Layer 5 companion — `check_output_channels(model_output)` — flags exfiltration markup (query-bearing or protocol-relative markdown images) in model output before rendering.
 
 ### Severity model
 

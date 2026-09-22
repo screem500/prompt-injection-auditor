@@ -44,10 +44,10 @@ against prompts in the wild; see Limits.
 | Vulnerable targets that fired their rule | 11 of 12 | **12 of 12** |
 | Unit tests | 76 pass | 76 pass |
 
-> **Current measurement (v2.6.1, 2026-09-02):** the table above is the
+> **Current measurement (v2.6.2, 2026-09-23):** the table above is the
 > historical v2.2 run kept for the record. Today's numbers are: hardened
 > mean **3.0** (8 files), vulnerable mean **46.3** (13 files), separation
-> **43.3**, **201 tests** — enforced by the CI gate job.
+> **43.3**, **234 tests** — enforced by the CI gate job.
 
 An 8-point gap meant a prompt with a live API key scored about the same as a
 carefully hardened one. That is the finding the benchmark existed to produce.
@@ -129,13 +129,13 @@ two are measured against different things.
 
 | Decision | Count | Share |
 |----------|------:|------:|
-| BLOCK — rejected before the model sees it | 102 | 15.7% |
-| WARN — passed sanitised, logged for monitoring | 128 | 19.7% |
-| ALLOW — not flagged at all | 420 | 64.6% |
+| BLOCK — rejected before the model sees it | 111 | 17.1% |
+| WARN — passed sanitised, logged for monitoring | 135 | 20.8% |
+| ALLOW — not flagged at all | 404 | 62.2% |
 
-Hard-stop recall (BLOCK only): **15.7%**
-Noticed at all (BLOCK + WARN): **35.4%**
-Mean threat score: 24.8 / 100
+Hard-stop recall (BLOCK only): **17.1%**
+Noticed at all (BLOCK + WARN): **37.8%**
+Mean threat score: 26.4 / 100
 
 Reproduced independently on two machines with identical results.
 
@@ -145,6 +145,21 @@ that scored WARN 35 only because they mention a person named Dan — the
 false-positive class the case-sensitive DAN fix removes. They were detected
 for the wrong reason; the CHANGELOG records the trade-off.*
 
+*Re-measured for v2.6.2 (2026-09-23): BLOCK 102 → 111, WARN 128 → 135,
+ALLOW 420 → 404, noticed 35.4% → 37.8%, mean 24.8 → 26.4. Both versions
+were run on the pinned corpus and diffed payload-by-payload: 29 payloads
+moved, all through the new concealment family ("never tell the user",
+"DO NOT WARN THE USER" — standard clauses in the jailbreak families this
+corpus collects) or the widened markdown-image pattern (two query-bearing
+image payloads). The corpus was not tuned to; the movement is new families
+catching phrasing that was always there.*
+
+### Reading the number honestly
+
+This is a low number and it is published as measured.
+
+**What the shield catches.** The 111 blocks come from its written families:
+
 ### Reading the number honestly
 
 This is a low number and it is published as measured.
@@ -153,7 +168,7 @@ This is a low number and it is published as measured.
 jailbreak attempts, persona hijacking, instruction override. The patterns
 work when the phrasing lands inside them.
 
-**What it misses.** The bulk of the 420 that passed are long role-play
+**What it misses.** The bulk of the 404 that passed are long role-play
 jailbreaks — the DAN family and its descendants — phrased outside the
 specific constructions the shield encodes. This is a coverage gap, not an
 implementation bug: no pattern in the shield was written to match them.
