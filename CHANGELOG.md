@@ -1,5 +1,46 @@
 # Changelog
 
+## v2.6.8 — 2026-09-24
+
+### Fixed — CI matrix on Python 3.8/3.10: one legacy f-string form, two version-dependent tests
+
+The v2.6.7 push was the first CI run to execute the test matrix on
+Python 3.8 and 3.10 (all previous green runs pre-dated the rounds that
+added these tests), and four jobs failed while 3.12 and the release
+gate stayed green. Two distinct causes, both fixed and verified under a
+real 3.11 interpreter:
+
+1. **`benchmark.py` carried a Python 3.12-only f-string since it was
+   written.** The surface-rule summary print concatenated two f-strings
+   across lines *inside* the outer f-string's braces — a construct that
+   only PEP 701 (3.12+) parses. Local runs on 3.12/3.14 and the gate
+   job (pinned to 3.12) never noticed; the matrix only started parsing
+   the file when the round-5 CR test began importing benchmark. The
+   message now lives in a variable, parsed identically by 3.8+.
+2. **Two huge-integer tests assumed Python 3.11+'s int-conversion
+   guard.** The interpreter's digit limit (ValueError on 5000 digits)
+   does not exist before 3.11 — there the number parses fine and is
+   scanned harmlessly, so the asserted "number width" note never
+   appears. The tests now pin the cross-version invariant (no crash,
+   allowed decision, honest notes) and condition the note assertion on
+   `sys.version_info >= (3, 11)` with a comment saying why.
+
+Housekeeping the review rounds kept noting: the `\p` docstring escape
+warning and two unclosed-file ResourceWarnings (benchmark.py, one test)
+are gone. Full suite green on 3.11 and 3.12; 3.8/3.10 share 3.11's
+f-string rules and the grammar check passes for every file.
+
+### Benchmark and external corpus (method unchanged, VALIDATION.md)
+
+Hardened 3.0 / vulnerable 46.3 / separation 43.3 — unchanged. garak
+in-the-wild (650 prompts, SHA-256 c072aa09…): BLOCK 111 / WARN 135 /
+ALLOW 404, noticed 37.8%, mean 26.4 — unchanged.
+
+### Tests
+
+337 tests, all green on Python 3.11 and 3.12 (two existing cases made
+version-aware; no count change).
+
 ## v2.6.7 — 2026-09-24
 
 ### Fixed — ninth-round review: negation-vocabulary parity, two test hardenings, three log-wording corrections

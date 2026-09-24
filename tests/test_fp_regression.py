@@ -123,7 +123,7 @@ two regressions introduced by round 5's own fixes:
 36. Concealment is one family at one weight in the base layer — same-
     surface duplicates no longer stack; independent evidence (env) still
     does by design.
-37. Quoted env spellings (setx "PAGER" "C:\path", set "PAGER=C:\path").
+37. Quoted env spellings (setx "PAGER" "C:/path", set "PAGER=C:/path").
 38. CLI stdout hygiene pinned: no raw payload bytes reach the terminal in
     any of the three tools (colors excepted).
 
@@ -1062,7 +1062,8 @@ class TestMeasurementTooling(unittest.TestCase):
     def test_verify_testset_mismatch_exits_nonzero(self):
         # The reproduction tool is network-bound, so this pins the contract
         # at source level: the final MISMATCH branch must exit non-zero.
-        src = open("verify_testset.py", encoding="utf-8").read()
+        with open("verify_testset.py", encoding="utf-8") as fh:
+            src = fh.read()
         self.assertIn('sys.exit("\\nMISMATCH', src)
 
 
@@ -1098,7 +1099,14 @@ class TestJsonResourceLimits(unittest.TestCase):
     def test_huge_integer_does_not_crash(self):
         result = guard_tool_response('{"n": ' + "9" * 5000 + "}")
         self.assertIn(result.decision, ("ALLOW", "WARN", "BLOCK"))
-        self.assertTrue(any("parser limits" in n for n in result.notes))
+        if sys.version_info >= (3, 11):
+            # Python 3.11+ enforces an integer-string conversion limit and
+            # raises ValueError — our guard reports it honestly. Older
+            # interpreters parse the number fine and scan it harmlessly;
+            # either way there is no crash and no silent pass.
+            self.assertTrue(any("number width" in n for n in result.notes))
+        else:
+            self.assertFalse(any("number width" in n for n in result.notes))
 
     def test_tool_definition_deep_input_no_crash(self):
         result = guard_tool_definition("[" * 1100 + '"x"' + "]" * 1100)
@@ -1317,7 +1325,10 @@ class TestJsonWhitespaceAndEscapes(unittest.TestCase):
 
     def test_huge_integer_note_is_honest(self):
         result = guard_tool_response('{"n": ' + "9" * 5000 + "}")
-        self.assertTrue(any("depth / number width" in n for n in result.notes))
+        # The note exists only where the interpreter enforces the
+        # conversion limit (3.11+); see test_huge_integer_does_not_crash.
+        if sys.version_info >= (3, 11):
+            self.assertTrue(any("depth / number width" in n for n in result.notes))
         self.assertFalse(any("size" in n for n in result.notes))
 
 

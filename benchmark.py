@@ -144,7 +144,8 @@ def analyse(path):
         # (PI-ANSI-INJECT line-overwrite); universal-newline translation
         # would erase it before scanning. Same stance as the pi_scan CLI
         # and pi_shield CLI (fifth review round).
-        text = open(path, encoding="utf-8", errors="ignore", newline="").read()
+        with open(path, encoding="utf-8", errors="ignore", newline="") as fh:
+            text = fh.read()
     except OSError as exc:
         return None, f"unreadable: {exc}"
     findings = scan(text)
@@ -294,9 +295,16 @@ def main():
             print(header("FALSE POSITIVE CHECK"))
             print(f"  {c(f'clean - no defect findings across {n} hardened files', 'bgreen', 'bold')}")
             if surfaced:
-                print(f"  {c(f'{surfaced} file(s) reported a surface rule '
-                             f'({", ".join(sorted(SURFACE_RULES))}) - expected, not counted',
-                             'grey')}")
+                # The message lives in a variable: the old form
+                # concatenated two f-strings across lines INSIDE the
+                # outer f-string's braces — a construct only Python 3.12
+                # (PEP 701) parses. The test matrix imports benchmark on
+                # 3.8/3.10, so the CI caught what local 3.12/3.14 runs
+                # never parsed (2026-09-24).
+                surface_list = ", ".join(sorted(SURFACE_RULES))
+                msg = (f'{surfaced} file(s) reported a surface rule '
+                       f'({surface_list}) - expected, not counted')
+                print(f"  {c(msg, 'grey')}")
             print()
 
     if args.csv:

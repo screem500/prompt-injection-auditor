@@ -133,6 +133,10 @@ prompt-injection-auditor/
 
 Run the full test suite with `python -m unittest discover tests`.
 
+### New in v2.6.8 — CI matrix restored on Python 3.8/3.10
+
+The v2.6.7 push was the first CI run over the new test code on older Pythons; four matrix jobs failed while 3.12 stayed green. Two causes, both fixed: a `benchmark.py` f-string form that only Python 3.12 parses (multi-line string concatenation inside f-string braces — never parsed on older interpreters until a test started importing it), and two huge-integer tests that assumed Python 3.11+'s int-digit guard (older versions parse the number fine — the tests now pin the cross-version invariant). Suite verified green on 3.11 and 3.12. 337 tests; benchmark and garak unchanged.
+
 ### New in v2.6.7 — ninth-round parity pass
 
 The ninth review closed the eighth round's remaining items and kept scope tight, per its own recommendation (`tests/test_fp_regression.py`, 6 new cases):
