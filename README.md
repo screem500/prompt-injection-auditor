@@ -133,6 +133,10 @@ prompt-injection-auditor/
 
 Run the full test suite with `python -m unittest discover tests`.
 
+### New in v2.6.9 — CI matrix closed for real: behavior-driven tests
+
+The v2.6.7/v2.6.8 pushes taught the project two lessons. First, `benchmark.py` carried an f-string only Python 3.12 parses — never seen until a test started importing the module on the matrix (fixed in v2.6.8). Second, the huge-integer tests pinned the right invariant but version-gated the note assertion on 3.11 — while the digit guard they target was backported as CVE-2020-10735 to every maintained 3.8/3.9/3.10 patch release, so CI fired it anyway. The tests are now behavior-driven: assert the invariant, inspect whatever note the runtime produced. Verified green on real CPython 3.8.20, 3.10.21, 3.11 and 3.12. 337 tests; benchmark and garak unchanged.
+
 ### New in v2.6.8 — CI matrix restored on Python 3.8/3.10
 
 The v2.6.7 push was the first CI run over the new test code on older Pythons; four matrix jobs failed while 3.12 stayed green. Two causes, both fixed: a `benchmark.py` f-string form that only Python 3.12 parses (multi-line string concatenation inside f-string braces — never parsed on older interpreters until a test started importing it), and two huge-integer tests that assumed Python 3.11+'s int-digit guard (older versions parse the number fine — the tests now pin the cross-version invariant). Suite verified green on 3.11 and 3.12. 337 tests; benchmark and garak unchanged.

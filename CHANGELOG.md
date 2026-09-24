@@ -1,5 +1,33 @@
 # Changelog
 
+## v2.6.9 — 2026-09-24
+
+### Fixed — CI matrix, take two: the digit guard is backported, so the tests are behavior-driven
+
+v2.6.8 fixed the 3.12-only f-string in benchmark.py (verified on a real
+3.11 interpreter) and version-gated the huge-integer tests on
+`sys.version_info >= (3, 11)` — but the CI matrix stayed red on 3.8/3.10.
+Reproducing on a real CPython 3.8.20 exposed the assumption error: the
+integer-conversion digit guard is NOT a 3.11-only feature. It was
+backported as the CVE-2020-10735 security fix (3.8.14+, 3.9.14+,
+3.10.7+), and CI always runs the newest patch releases — so the guard
+fires there and the note appears, which the version check declared
+impossible. The tests no longer consult version numbers at all: they
+assert the cross-runtime invariant (no crash, an allowed decision, no
+false "size" claim) and inspect whatever note the runtime produced.
+Verified green on CPython 3.8.20, 3.10.21, 3.11 and 3.12.
+
+### Benchmark and external corpus (method unchanged, VALIDATION.md)
+
+Hardened 3.0 / vulnerable 46.3 / separation 43.3 — unchanged. garak
+in-the-wild (650 prompts, SHA-256 c072aa09…): BLOCK 111 / WARN 135 /
+ALLOW 404 — unchanged.
+
+### Tests
+
+337 tests, all green on CPython 3.8.20, 3.10.21, 3.11 and 3.12 (two
+existing cases made runtime-agnostic; no count change).
+
 ## v2.6.8 — 2026-09-24
 
 ### Fixed — CI matrix on Python 3.8/3.10: one legacy f-string form, two version-dependent tests
@@ -18,12 +46,13 @@ real 3.11 interpreter:
    the file when the round-5 CR test began importing benchmark. The
    message now lives in a variable, parsed identically by 3.8+.
 2. **Two huge-integer tests assumed Python 3.11+'s int-conversion
-   guard.** The interpreter's digit limit (ValueError on 5000 digits)
-   does not exist before 3.11 — there the number parses fine and is
-   scanned harmlessly, so the asserted "number width" note never
-   appears. The tests now pin the cross-version invariant (no crash,
-   allowed decision, honest notes) and condition the note assertion on
-   `sys.version_info >= (3, 11)` with a comment saying why.
+   guard.** The tests pinned the cross-version invariant (no crash,
+   allowed decision, honest notes) and conditioned the note assertion
+   on `sys.version_info >= (3, 11)` — *almost* right: the guard was
+   backported as CVE-2020-10735 (3.8.14+/3.9.14+/3.10.7+), so CI's
+   patch releases fired it anyway and the matrix stayed red. The
+   follow-up that actually closed this is v2.6.9 below: the tests are
+   behavior-driven, not version-gated.
 
 Housekeeping the review rounds kept noting: the `\p` docstring escape
 warning and two unclosed-file ResourceWarnings (benchmark.py, one test)

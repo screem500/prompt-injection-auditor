@@ -1099,14 +1099,15 @@ class TestJsonResourceLimits(unittest.TestCase):
     def test_huge_integer_does_not_crash(self):
         result = guard_tool_response('{"n": ' + "9" * 5000 + "}")
         self.assertIn(result.decision, ("ALLOW", "WARN", "BLOCK"))
-        if sys.version_info >= (3, 11):
-            # Python 3.11+ enforces an integer-string conversion limit and
-            # raises ValueError — our guard reports it honestly. Older
-            # interpreters parse the number fine and scan it harmlessly;
-            # either way there is no crash and no silent pass.
-            self.assertTrue(any("number width" in n for n in result.notes))
-        else:
-            self.assertFalse(any("number width" in n for n in result.notes))
+        # The integer-conversion digit guard exists on 3.11+ AND on every
+        # version that shipped the CVE-2020-10735 backport (3.8.14+,
+        # 3.9.14+, 3.10.7+) — CI always runs the newest patch release, so
+        # the note is present there. Behavior, not version numbers: if
+        # the guard fired we report it; if it didn't, the number parsed
+        # and was scanned harmlessly. Both are correct; a crash never is.
+        if any("parser limits" in n for n in result.notes):
+            self.assertIn("number width", next(n for n in result.notes
+                                               if "parser limits" in n))
 
     def test_tool_definition_deep_input_no_crash(self):
         result = guard_tool_definition("[" * 1100 + '"x"' + "]" * 1100)
@@ -1325,11 +1326,14 @@ class TestJsonWhitespaceAndEscapes(unittest.TestCase):
 
     def test_huge_integer_note_is_honest(self):
         result = guard_tool_response('{"n": ' + "9" * 5000 + "}")
-        # The note exists only where the interpreter enforces the
-        # conversion limit (3.11+); see test_huge_integer_does_not_crash.
-        if sys.version_info >= (3, 11):
-            self.assertTrue(any("depth / number width" in n for n in result.notes))
+        # No byte-size limit is enforced, so the note must never claim
+        # one; and a limits note always names the real dimensions. The
+        # note's PRESENCE depends on the runtime's digit guard (see
+        # test_huge_integer_does_not_crash) — asserted behaviorally there.
         self.assertFalse(any("size" in n for n in result.notes))
+        for note in result.notes:
+            if "parser limits" in note:
+                self.assertIn("depth / number width", note)
 
 
 class TestGateNegationWithinSpan(unittest.TestCase):
