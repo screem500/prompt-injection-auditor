@@ -140,7 +140,11 @@ def collect(root):
 
 def analyse(path):
     try:
-        text = open(path, encoding="utf-8", errors="ignore").read()
+        # newline="" — a stray carriage return is an attack signal
+        # (PI-ANSI-INJECT line-overwrite); universal-newline translation
+        # would erase it before scanning. Same stance as the pi_scan CLI
+        # and pi_shield CLI (fifth review round).
+        text = open(path, encoding="utf-8", errors="ignore", newline="").read()
     except OSError as exc:
         return None, f"unreadable: {exc}"
     findings = scan(text)

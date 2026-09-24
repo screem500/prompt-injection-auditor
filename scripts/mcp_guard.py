@@ -35,22 +35,26 @@ Usable as a library or as a CLI:
 No third-party dependencies. Python 3.8+.
 """
 
+import base64
 import json
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 
 # Reuse pi_shield's battle-tested layers. Works both when imported as
 # scripts.mcp_guard (tests, repo root) and when run directly (CLI).
 try:
     from scripts.pi_shield import (
-        normalize, sanitize_output, score_patterns, scan_encoded, _fold_probe,
-        ENV_VERB_RE, ENV_CORE_RE,
+        normalize, sanitize_output, score_patterns, _fold_probe,
+        _B64_RE, _HEX_RE, _printable_ratio,
+        ENV_VERB_RE, ENV_CORE_RE, MD_IMG_QUERY, MD_IMG_BARE_PROTOREL,
     )
 except ImportError:  # direct execution: python scripts/mcp_guard.py
     from pi_shield import (
-        normalize, sanitize_output, score_patterns, scan_encoded, _fold_probe,
-        ENV_VERB_RE, ENV_CORE_RE,
+        normalize, sanitize_output, score_patterns, _fold_probe,
+        _B64_RE, _HEX_RE, _printable_ratio,
+        ENV_VERB_RE, ENV_CORE_RE, MD_IMG_QUERY, MD_IMG_BARE_PROTOREL,
     )
 
 # Arabic support is optional at import time so older checkouts still run.
@@ -104,8 +108,8 @@ MCP_PATTERNS = [
     # is optional since v2.6.2: the protocol-relative "//host" form bypasses
     # scheme allowlists (GrafanaGhost). A bare protocol-relative image carries
     # no query but is still a render callback, so it warns.
-    (r"!\[[^\]]*\]\(\s*(?:https?:)?//[^)\s]*[?=&]", 60, "markdown exfiltration channel"),
-    (r"!\[[^\]]*\]\(\s*//[^)\s?=&]*\)", 30, "protocol-relative markdown image (render callback)"),
+    (MD_IMG_QUERY, 60, "markdown exfiltration channel"),
+    (MD_IMG_BARE_PROTOREL, 30, "protocol-relative markdown image (render callback)"),
     (r"https?://[^\s)\]]*(?:webhook\.site|requestbin|hookbin|ngrok|canarytokens|burpcollaborator|oastify|interact\.sh|pipedream)", 60, "known exfiltration endpoint"),
 
     # Environment-variable poisoning (v2.6.2; Cursor CVE-2026-22708, fixed in
@@ -132,7 +136,7 @@ MCP_PATTERNS = [
     (r"\bupdate\s+your\s+(?:memory|records|knowledge|notes|preferences|beliefs)\b", 35, "memory-write instruction"),
     (r"\u062a\u0630\u0643\u0631\s+(?:\u0627\u0646|\u0647\u0630\u0627|\u0647\u0630\u0647)\b", 25, "memory-write instruction"),
     (r"\u0645\u0646\s+\u0627\u0644\u0627\u0646\s+\u0641\u0635\u0627\u0639\u062f\u0627", 30, "memory-write instruction"),
-    (r"(?:\u0627\u062d\u0641\u0638|\u062e\u0630\u0646|\u0633\u062c\u0644)\b[^\n]{0,40}(?:\u0630\u0627\u0643\u0631\u062a|\u0630\u0643\u0631\u0649|\u0645\u0644\u0627\u062d\u0638\u0627\u062a)", 40, "memory-write instruction"),
+    (r"(?:\u0627\u062d\u0641\u0638|\u062e\u0632\u0646|\u0633\u062c\u0644)\b[^\n]{0,40}(?:\u0630\u0627\u0643\u0631\u062a|\u0630\u0643\u0631\u064a|\u0645\u0644\u0627\u062d\u0638\u0627\u062a)", 40, "memory-write instruction"),
 
     # Concealment / masquerade (v2.6.2; Gemini calendar-invite injection,
     # January 2026): the payload's second half orders the agent to hide the
@@ -146,7 +150,7 @@ MCP_PATTERNS = [
     (r"\btell\s+the\s+user\s+(?:that\s+)?(?:everything|all|it)\s+is\s+(?:fine|ok(?:ay)?|normal|safe)\b", 45, "masquerade instruction"),
     (r"\b(?:respond|reply|answer)\s+with\s+['\"]", 25, "masquerade instruction"),
     (r"(?:\u0644\u0627\s+\u062a\u062e\u0628\u0631|\u0644\u0627\s+\u062a\u0628\u0644\u063a|\u0644\u0627\s+\u062a\u0639\u0644\u0645|\u0644\u0627\s+\u062a\u062d\u0630\u0631)\s+\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", 50, "concealment instruction"),
-    (r"(?:\u062f\u0648\u0646|\u0628\u062f\u0648\u0646)\s+(?:\u0627\u062e\u0628\u0627\u0631|\u0625\u0628\u0644\u0627\u063a|\u0627\u0628\u0644\u0627\u063a|\u0625\u0639\u0644\u0627\u0645|\u0627\u0639\u0644\u0627\u0645)\s+\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", 50, "concealment instruction"),
+    (r"(?:\u062f\u0648\u0646|\u0628\u062f\u0648\u0646)\s+(?:\u0627\u062e\u0628\u0627\u0631|\u0627\u0628\u0644\u0627\u063a|\u0627\u0639\u0644\u0627\u0645)\s+\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", 50, "concealment instruction"),
 
     # Hidden instruction channels.
     (r"<!--[^>]*(?:ignore|instruction|system|prompt|secret|password|token|previous)[^>]*-->", 35, "hidden instruction in HTML comment"),
@@ -187,13 +191,51 @@ _AR_SEVERITY_WEIGHT = {"Critical": 60, "High": 60, "Medium": 25, "Low": 10}
 # JSON-aware string extraction
 # ---------------------------------------------------------------------------
 
+def _safe_path_key(key):
+    """Render a JSON key for embedding in a finding PATH — display text
+    that may be printed to a terminal. v2.6.4 escaped only the $key
+    preview and left the raw key inside the VALUE's path (a key carrying
+    OSC 52 leaked a raw ESC into CLI stdout, seventh review round);
+    v2.6.5 still let the C1 range (U+0080-009F, the single-character OSC
+    forms) and invisible format characters (ZWSP, ZWJ, bidi marks, the
+    tag block) through (eighth review round). The rule is now categorical:
+    every Unicode character whose class starts with C (control, format,
+    surrogate, private-use, unassigned) renders as a visible escape;
+    everything else passes through readable."""
+    out = []
+    for ch in key:
+        if unicodedata.category(ch).startswith("C"):
+            code = ord(ch)
+            if code <= 0xFF:
+                out.append(f"\\x{code:02x}")
+            elif code <= 0xFFFF:
+                out.append(f"\\u{code:04x}")
+            else:
+                out.append(f"\\U{code:08x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _walk_strings(obj, path="$"):
-    """Yield (json_path, string) for every string value in parsed JSON."""
+    """Yield (json_path, string) for every string in parsed JSON.
+
+    Keys included since v2.6.3: a key reaches the model's context exactly
+    like a value when the document is re-serialized, so a payload parked in
+    a property NAME ({"Ignore all previous instructions": "x"}) is scanned
+    too. Key entries carry a $key[...] path marker so a finding tells the
+    reviewer where the payload sits. Every key embedding — preview or
+    value path — is escaped for display safety.
+    """
     if isinstance(obj, str):
         yield path, obj
     elif isinstance(obj, dict):
         for key, value in obj.items():
-            yield from _walk_strings(value, f"{path}.{key}")
+            if isinstance(key, str):
+                yield f"{path}.$key[{_safe_path_key(key)[:24]}]", key
+                yield from _walk_strings(value, f"{path}.{_safe_path_key(key)}")
+            else:
+                yield from _walk_strings(value, f"{path}.{key}")
     elif isinstance(obj, list):
         for index, value in enumerate(obj):
             yield from _walk_strings(value, f"{path}[{index}]")
@@ -203,28 +245,38 @@ def _walk_strings(obj, path="$"):
 # Scanning pipeline
 # ---------------------------------------------------------------------------
 
+def _raw_signal_findings(text):
+    """The raw-text signal layer: invisible tag block, OSC 52 clipboard
+    writes, and the dangerous terminal sequences. These are the only
+    checks that must run on UN-normalized bytes — normalizers strip the
+    very characters being detected. Shared by the direct chunk path and
+    the decoded-blob path (seventh review round: a base64-wrapped OSC 8
+    hyperlink decoded to a folded view where the escape no longer existed
+    and scored 0). Returns (score, [findings])."""
+    findings = []
+    score = 0
+    if _UNICODE_TAG_RE.search(text):
+        findings.append("invisible unicode tag characters (+60)")
+        score += 60
+    if _OSC52_RE.search(text):
+        findings.append("terminal clipboard-write sequence (OSC 52) (+30)")
+        score += 30
+    for pattern, label in _ANSI_DANGEROUS:
+        if pattern.search(text):
+            findings.append(f"{label} (+60)")
+            score += 60
+    return score, findings
+
+
 def _scan_chunk(text):
     """Run the full guard pipeline on one string. Returns (score, findings)."""
     findings = []
     score = 0
 
-    # 0. Invisible unicode tag block — detect on RAW text (normalizers strip it)
-    if _UNICODE_TAG_RE.search(text):
-        findings.append("invisible unicode tag characters (+60)")
-        score += 60
-
-    # 0b. Terminal clipboard-write (OSC 52) — raw text, same stance as
-    # PI-ANSI-INJECT in the scanner. SGR color sequences stay weightless on
-    # purpose: captured build logs legitimately carry them (second review).
-    if _OSC52_RE.search(text):
-        findings.append("terminal clipboard-write sequence (OSC 52) (+30)")
-        score += 30
-
-    # 0c. Dangerous terminal sequences — conceal, hyperlink, REP flood, DCS.
-    for pattern, label in _ANSI_DANGEROUS:
-        if pattern.search(text):
-            findings.append(f"{label} (+60)")
-            score += 60
+    # 0-0c. Raw-text signal layer (see _raw_signal_findings).
+    raw_score, raw_findings = _raw_signal_findings(text)
+    score += raw_score
+    findings.extend(raw_findings)
 
     # 1. Normalize: NFKC, zero-width/bidi/homoglyph cleanup, then Arabic
     #    diacritics/tatweel/letter-variant cleanup (v2.1 rules, if present).
@@ -232,37 +284,82 @@ def _scan_chunk(text):
     if normalize_arabic is not None:
         norm = normalize_arabic(norm)
 
-    # 2. pi_shield base patterns (instruction override, persona hijack, ...)
+    # 2-4. Base + MCP + Arabic patterns on the normalized view.
+    surf_score, surf_findings = _score_surface(norm)
+    score += surf_score
+    findings.extend(surf_findings)
+
+    # 5. Encoded payloads — decode base64/hex blobs, then run the SAME
+    #    surface on the decoded content, exactly one decode level deep.
+    #    v2.6.3 review fix: v2.6.2 rescanned decoded text with the English
+    #    base patterns only, so a base64-wrapped <system> tag or an Arabic
+    #    override sailed through at 0 while its direct form blocked at 60.
+    #    v2.6.4 review fix: the decoded text also crosses the SAME
+    #    normalization as direct input (NFKC fold + Arabic normalization) —
+    #    previously a diacritized, fullwidth or zero-width-wrapped payload
+    #    decoded to raw bytes the patterns were never meant to see.
+    enc_score = 0
+    for codec, decoded in _decoded_blobs(norm):
+        # Raw-signal layer on the decoded BYTES (before normalization
+        # strips the escapes being detected), then the full normalized
+        # surface — the decoded path now crosses everything direct input
+        # crosses.
+        sub_raw, sub_raw_findings = _raw_signal_findings(decoded)
+        folded = normalize(decoded)
+        if normalize_arabic is not None:
+            folded = normalize_arabic(folded)
+        sub_score, sub_findings = _score_surface(folded)
+        sub_score += sub_raw
+        sub_findings = sub_raw_findings + sub_findings
+        if sub_score:
+            labels = ", ".join(f.rsplit(" (+", 1)[0] for f in sub_findings)
+            findings.append(
+                f"{codec} blob decodes to injection payload ({labels}) "
+                f"(+{max(30, sub_score)})"
+            )
+            enc_score += max(30, sub_score)
+    score += min(enc_score, 100)
+
+    return min(score, 100), findings
+
+
+def _score_surface(norm):
+    """Run every pattern layer on an already-normalized string.
+
+    Order: pi_shield base patterns, then the MCP-specific patterns with
+    family dedup (a finding family counts once, at its highest weight — a
+    stricter MCP weight is applied as the escalation difference, recorded so
+    a third pattern of the same family cannot escalate twice), then the
+    Arabic injection rules. Shared by the direct path and the decoded-blob
+    path so both cross the same checks (review round 5).
+
+    Returns (score, [finding strings]).
+    """
+    findings = []
+    score = 0
+
     base_score, hits = score_patterns(norm)
     score += base_score
     findings.extend(f"{label} (+{weight})" for label, weight in hits)
-    # A finding FAMILY (same label) never counts twice in one chunk: since
-    # v2.6.2 the base layer and MCP_PATTERNS share families (environment-
-    # variable poisoning, concealment, markdown exfiltration). When the MCP
-    # pattern is stricter, only the difference is added — the tool channel's
-    # stance still wins, but the family is scored once (same principle as
-    # the case-sensitive DAN dedup inside score_patterns).
     base_by_label = {}
     for label, weight in hits:
         base_by_label[label] = max(base_by_label.get(label, 0), weight)
 
-    # 3. MCP-specific patterns
     for pattern, weight, label in MCP_PATTERNS:
         if re.search(pattern, norm, _FLAGS):
             prev = base_by_label.get(label)
             if prev is None:
                 findings.append(f"{label} (+{weight})")
                 score += weight
+                base_by_label[label] = weight
             elif weight > prev:
                 findings.append(
                     f"{label} (+{weight - prev} tool-channel escalation)"
                 )
                 score += weight - prev
-            # else: the base layer already counted this family at an equal
-            # or higher weight — the finding stands, the score does not
-            # double.
+                base_by_label[label] = weight
+            # else: the family already stands at an equal or higher weight.
 
-    # 4. Arabic injection rules
     if ARABIC_INJECTION_PATTERNS:
         for rule in ARABIC_INJECTION_PATTERNS:
             patterns = rule.get("patterns", [])
@@ -271,21 +368,131 @@ def _scan_chunk(text):
                 findings.append(f"{rule.get('id', 'PI-AR')}: {rule.get('title', 'arabic injection')} (+{weight})")
                 score += weight
 
-    # 5. Encoded payloads — decode base64/hex blobs and scan their contents
-    enc_score, enc_findings = scan_encoded(norm)
-    score += enc_score
-    findings.extend(enc_findings)
-
     return min(score, 100), findings
 
 
+def _decoded_blobs(text):
+    """Yield (codec, decoded_string) for base64/hex blobs whose decoded form
+    is mostly printable text. One level only — decoded content is scored,
+    never re-decoded, so a blob nested in a blob cannot loop the scanner."""
+    for blob in _B64_RE.findall(text):
+        try:
+            decoded = base64.b64decode(blob + "=" * (-len(blob) % 4)).decode("utf-8", "ignore")
+        except Exception:
+            continue
+        if _printable_ratio(decoded) > 0.85:
+            yield "base64", decoded
+    for blob in _HEX_RE.findall(text):
+        try:
+            decoded = bytes.fromhex(blob).decode("utf-8", "ignore")
+        except Exception:
+            continue
+        if _printable_ratio(decoded) > 0.85:
+            yield "hex", decoded
+
+
+# --- JSON resource limits (v2.6.4, sixth review round) ----------------------
+# Platform-default recursion limits differ (1000 on a stock interpreter,
+# higher in some environments), so "it parses fine here" cannot be the
+# policy. Two deterministic guards:
+#   * _json_nesting_depth — an iterative (non-recursive) bracket counter;
+#     documents deeper than _MAX_JSON_DEPTH are never handed to json.loads.
+#   * the parse itself catches RecursionError and ValueError (a 5000-digit
+#     integer raises ValueError on Python 3.12+ via the int conversion
+#     guard), failing over to the plain-text scan.
+_MAX_JSON_DEPTH = 400
+
+_JSON_UNESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def _json_nesting_depth(text):
+    """Maximum bracket nesting of a JSON-looking string, computed
+    iteratively. Returns 0 for non-JSON input; quotes are honored so
+    brackets inside strings do not count."""
+    if not text or text[0] not in "{[":
+        return 0
+    depth = max_depth = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            depth += 1
+            if depth > max_depth:
+                max_depth = depth
+        elif ch in "}]":
+            depth = max(0, depth - 1)
+    return max_depth
+
+
+_JSON_SHORT_ESCAPES = {'"': '"', "\\": "\\", "/": "/",
+                       "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _json_unescape(text):
+    """Decode JSON escape sequences (\\uNNNN plus the short \\n \\t \\\\ …
+    set) with a single left-to-right pass — no double-decoding, so
+    "\\u005cn" yields backslash+n (two characters) exactly as JSON
+    specifies. Used only on the parse-failure fallback, where a payload
+    written with escape spellings must still be seen by the patterns
+    (seventh review round: \\n-escaped deep payloads scored 0)."""
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = text[i + 1]
+            if nxt == "u" and i + 5 < n:
+                try:
+                    out.append(chr(int(text[i + 2:i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            if nxt in _JSON_SHORT_ESCAPES:
+                out.append(_JSON_SHORT_ESCAPES[nxt])
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _sanitize_json(obj):
-    """Rebuild a parsed JSON value with every string passed through
-    sanitize_output(), so the sanitized form stays valid, parseable JSON."""
+    """Rebuild a parsed JSON value with every string — keys included —
+    passed through sanitize_output(), so the sanitized form stays valid,
+    parseable JSON. If two keys fold into one after sanitization the later
+    key keeps its value under a numeric suffix: a silent merge would change
+    the document's meaning without a trace (review round 5)."""
     if isinstance(obj, str):
         return sanitize_output(obj)
     if isinstance(obj, dict):
-        return {key: _sanitize_json(value) for key, value in obj.items()}
+        out = {}
+        for key, value in obj.items():
+            new_key = sanitize_output(key) if isinstance(key, str) else key
+            # json.loads already dedups identical keys, so `in out` means a
+            # genuine fold-collision (one of the pair changed shape in
+            # sanitization) — suffix the later key rather than overwrite.
+            if new_key in out:
+                suffix = 2
+                while f"{new_key} ({suffix})" in out:
+                    suffix += 1
+                new_key = f"{new_key} ({suffix})"
+            out[new_key] = _sanitize_json(value)
+        return out
     if isinstance(obj, list):
         return [_sanitize_json(value) for value in obj]
     return obj
@@ -300,12 +507,26 @@ _TOOL_TAG_RE = re.compile(
     r"</?\s*tool_data(?:\s+name=\"[^\"]*\")?\s*>", re.IGNORECASE)
 _BRACKET_NEUTRALIZE = {"<": "\u2039", ">": "\u203A"}
 
+# v2.6.3 review fix: tool_name lands inside the wrapper's name="..."
+# attribute, so an untrusted name carrying a quote or a closing tag broke
+# out of the attribute and injected markup into the "sanitized" output
+# (e.g. tool_name='x</tool_data><system>...' survived with ALLOW/0). The
+# name is cosmetic metadata, never authority: reduce it to the MCP tool
+# name charset before it is allowed anywhere near the wrapper.
+_UNSAFE_TOOL_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_tool_name(name):
+    return _UNSAFE_TOOL_NAME_RE.sub("_", name)
+
 
 def wrap_tool_response(text, tool_name=""):
     """Wrap a tool response in neutral delimiters for safe model context.
 
     Any </tool_data> forgery inside the response is neutralized first, so the
     data can never break out of its container and impersonate instructions.
+    The tool_name is reduced to [A-Za-z0-9._-] before it is embedded in the
+    wrapper's attribute — it is metadata, and it must not carry markup.
     """
     # Detect on the length-preserving NFKC fold (fullwidth / mathematical /
     # CJK look-alikes), then neutralize the bracket chars in place — same
@@ -322,7 +543,7 @@ def wrap_tool_response(text, tool_name=""):
         escaped = "".join(chars)
     else:
         escaped = text
-    name_attr = f' name="{tool_name}"' if tool_name else ""
+    name_attr = f' name="{_safe_tool_name(tool_name)}"' if tool_name else ""
     return f"<{_TOOL_DELIM}{name_attr}>\n{escaped}\n</{_TOOL_DELIM}>"
 
 
@@ -354,20 +575,66 @@ def guard_tool_response(text, tool_name="", warn_at=30, block_at=60):
     chunks = None
     parsed = None
     parsed_ok = False
-    try:
-        candidate = json.loads(text)
-        chunks = [(path, value) for path, value in _walk_strings(candidate)]
-        if chunks:
-            parsed = candidate
-            parsed_ok = True
-            notes.append(f"JSON input: scanned {len(chunks)} string value(s)")
-        else:
-            chunks = None
-    except (json.JSONDecodeError, TypeError):
-        chunks = None
+    parse_failed = None
+    # JSON permits insignificant whitespace around the document — every
+    # shape decision runs on the stripped view, the original bytes are
+    # what gets scanned (seventh review round: a single leading space
+    # defeated the depth guard and the escape unwrapping).
+    json_view = text.lstrip()
+    # A JSON document may be an object, an array — or a bare STRING (the
+    # root "…" form). v2.6.5 dropped the string root and regressed it to
+    # ALLOW 0 for escaped payloads (eighth review round); '"' is JSON-
+    # shaped again. (Scalar numbers/bools carry no string payload.)
+    looks_json = bool(json_view) and json_view[0] in '{["'
+    if looks_json:
+        try:
+            if _json_nesting_depth(json_view) <= _MAX_JSON_DEPTH:
+                candidate = json.loads(json_view)
+                chunks = [(path, value) for path, value in _walk_strings(candidate)]
+                if chunks:
+                    parsed = candidate
+                    parsed_ok = True
+                    notes.append(
+                        f"JSON input: scanned {len(chunks)} string field(s) (keys and values)"
+                    )
+                else:
+                    chunks = None
+            else:
+                # Deterministic depth guard: never hand hostile nesting to
+                # json.loads at all (platform recursion limits vary; the
+                # fallback below runs every pattern on the raw content).
+                parse_failed = "depth"
+        except RecursionError:
+            parse_failed = "depth"
+        except json.JSONDecodeError:
+            # Well-formed intent, bad syntax: "not JSON", not "limits" —
+            # no note, the plain-text scan below still runs. (Must precede
+            # ValueError: JSONDecodeError subclasses it.)
+            parse_failed = None
+        except (TypeError, ValueError):
+            # ValueError: a 5000-digit integer raises on Python 3.12+ via
+            # the int conversion guard — a genuine resource limit, unlike
+            # a plain syntax error.
+            parse_failed = "limits"
 
     if chunks is None:
         chunks = [("", text)]
+        if parse_failed == "depth":
+            notes.append(
+                f"JSON too deeply nested to parse safely (>{_MAX_JSON_DEPTH}) "
+                "— scanned as plain text"
+            )
+        elif parse_failed == "limits":
+            notes.append(
+                "JSON exceeds parser limits (depth / number width) "
+                "— scanned as plain text"
+            )
+        if looks_json and "\\" in json_view:
+            # A JSON-shaped input that failed parsing may carry its payload
+            # as escape spellings (\uNNNN, \n, …); the raw-text scan would
+            # see only the escapes. Scan the unescaped variant as a second
+            # chunk so the payload is still seen (sixth/seventh rounds).
+            chunks.append(("", _json_unescape(json_view)))
 
     max_score = 0
     for path, chunk in chunks:
@@ -384,12 +651,22 @@ def guard_tool_response(text, tool_name="", warn_at=30, block_at=60):
     # into the "safe" wrapped output. JSON inputs are rebuilt value-by-value
     # so the sanitized form stays parseable.
     if parsed_ok:
-        sanitized_body = json.dumps(_sanitize_json(parsed),
-                                    ensure_ascii=False, indent=2)
-        # The note must mean a value actually changed: re-serializing clean
-        # JSON already differs from the original bytes (indent, spacing), so
-        # comparing whole strings fires on every clean document (2nd review).
-        changed = any(sanitize_output(value) != value for _, value in chunks)
+        try:
+            sanitized_body = json.dumps(_sanitize_json(parsed),
+                                        ensure_ascii=False, indent=2)
+            # The note must mean a value actually changed: re-serializing
+            # clean JSON already differs from the original bytes (indent,
+            # spacing), so comparing whole strings fires on every clean
+            # document (2nd review). Keys are in chunks, so they are
+            # compared too (5th review).
+            changed = any(sanitize_output(value) != value
+                          for _, value in chunks)
+        except RecursionError:
+            # Same fail-over as the parse path: never crash, never pass the
+            # raw deep document through untouched.
+            sanitized_body = sanitize_output(text)
+            changed = sanitized_body != text
+            notes.append("sanitized form rebuilt as plain text (JSON nesting limit)")
     else:
         sanitized_body = sanitize_output(text)
         changed = sanitized_body != text
@@ -409,12 +686,28 @@ def guard_tool_definition(tool, warn_at=30, block_at=60):
     verbatim, so a malicious server can hide instructions in them
     ("tool poisoning"). Returns a GuardResult like guard_tool_response.
     """
+    original = tool
     if isinstance(tool, str):
+        # Same resource posture as guard_tool_response: a string that is
+        # not parseable JSON (or is hostilely deep) is handed through as
+        # text instead of crashing the caller (sixth review round); the
+        # shape checks run on the whitespace-stripped view (seventh).
+        view = tool.lstrip()
         try:
-            tool = json.loads(tool)
-        except json.JSONDecodeError:
+            if view[:1] in "{[" and _json_nesting_depth(view) <= _MAX_JSON_DEPTH:
+                tool = json.loads(view)
+        except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
             pass
-    text = json.dumps(tool, ensure_ascii=False, indent=2) if not isinstance(tool, str) else tool
+    if isinstance(tool, str):
+        text = tool
+    else:
+        try:
+            text = json.dumps(tool, ensure_ascii=False, indent=2)
+        except (RecursionError, ValueError):
+            # Re-serializing a hostilely deep structure must not crash the
+            # caller either — scan the original input as text (seventh
+            # review round: RecursionError at json.dumps on 1100 levels).
+            text = original if isinstance(original, str) else str(original)
     result = guard_tool_response(text, tool_name="tool-definition",
                                  warn_at=warn_at, block_at=block_at)
     result.notes.insert(0, "tool definition scan (tool-poisoning check)")

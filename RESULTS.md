@@ -98,10 +98,12 @@ Agreement with the scanner: **135/150 cells (90.0%)** —
 q1 hierarchy 29/30 · q2 role guard 28/30 · q3 delimiters 29/30 ·
 q4 refusal 29/30 · **q5 output limits 20/30**.
 
-All 12 disagreements point one way: the scanner claims a control is absent
-where the rater found it declared — the scanner is **systematically
-conservative** (overstates risk, never understates it in this sample). Two
-specific pattern gaps were identified and are documented, not fixed (freeze):
+All 15 disagreements (150 − 135 cells) point one way: the scanner claims a
+control is absent where the rater found it declared — the scanner is
+**systematically conservative** (overstates risk, never understates it in
+this sample). Two pattern gaps account for 12 of the 15 cells and are
+documented, not fixed (freeze); the remaining three are single-cell
+divergences in q1/q3/q4, same direction, no pattern claimed for them:
 
 - **PI-NO-OUTPUTLIM misses a category, not a phrasing**: structural output
   mandates ("You MUST produce following this exact structure", word budgets,

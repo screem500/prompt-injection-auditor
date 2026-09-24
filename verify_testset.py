@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import shutil
 import statistics
 import sys
 import urllib.request
@@ -29,7 +30,18 @@ REPOS = [
 REPO = "screem500/prompt-injection-auditor"
 FROZEN_COMMIT = "b1b80fb724cf30694a7e174ae593cba16cdcb3a6"
 SCANNER_SHA256 = "93dc6ef7e288806a7930fde5cc7962f9e58012c40ed6b6847adc762d8df8e377"
-SCANNER_FILES = ["pi_scan.py", "language_rules.py", "normalization.py", "rule_docs.py"]
+# Fifth review round: every file that can influence the scan is pinned, not
+# just pi_scan.py — the helpers are imported by the frozen scanner, so their
+# bytes are part of the measurement. rule_docs.py was dropped from the list:
+# it does not exist at the frozen commit (the frozen pi_scan.py imports only
+# language_rules and normalization), so the raw fetch 404'd on machines
+# without the warm local cache.
+SCANNER_SHA256_ALL = {
+    "pi_scan.py": "93dc6ef7e288806a7930fde5cc7962f9e58012c40ed6b6847adc762d8df8e377",
+    "language_rules.py": "e62fd9f5aede1ae746a519ca5e916b517af6ee90ad5d05b158d691bc0a0ffa72",
+    "normalization.py": "46705c700ad9102a15aa0dfb02b40e6678cdd743a84bc3a5e779a6926719bf8c",
+}
+SCANNER_FILES = list(SCANNER_SHA256_ALL)
 MIN_CHARS = 200
 
 EXPECTED = {
@@ -80,6 +92,11 @@ def fetch(url, binary=False):
 
 print("== 1/4  re-collecting corpus from pinned commits ==")
 corpus = BUILD / "corpus"
+# Fresh directory every run (fifth review round): a reused corpus folder let
+# stale files from an older collection silently enter the measurement
+# without entering the manifest comparison.
+if corpus.exists():
+    shutil.rmtree(corpus)
 corpus.mkdir(parents=True, exist_ok=True)
 rows = []
 seen = set()
@@ -109,8 +126,19 @@ for sid, repo, sha in REPOS:
     print(f"  {sid:15s} kept={kept}")
 
 print("\n== 2/4  comparing against the committed manifest ==")
+# Read the manifest from THIS checkout instead of raw main (fifth review
+# round): the local file is pinned to whatever commit is being verified,
+# while main moves. Fallback to the network only if the file is absent.
+local_manifest = Path(__file__).with_name("manifest-test.jsonl")
+if not local_manifest.exists():
+    # Refuse rather than fall back to raw main (sixth review round): main
+    # moves, and a moving manifest would compare today's corpus against a
+    # different measurement's manifest. The file ships with the repo.
+    sys.exit("manifest-test.jsonl missing next to verify_testset.py — "
+             "run from a full checkout; refusing to fetch an unpinned main copy.")
 committed = [json.loads(l) for l in
-             fetch(f"https://raw.githubusercontent.com/{REPO}/main/manifest-test.jsonl").splitlines()]
+             local_manifest.read_text(encoding="utf-8").splitlines()]
+print("  manifest: local checkout copy (pinned to this commit)")
 ok_hashes = {r["sha256"] for r in rows} == {r["sha256"] for r in committed}
 mine_counts = Counter(r["source"] for r in rows)
 ok_counts = all(mine_counts[s] == n for s, n in EXPECTED["sources"].items())
@@ -123,27 +151,40 @@ print("\n== 3/4  fetching the frozen scanner (pinned commit) ==")
 sdir = BUILD / "scanner"
 sdir.mkdir(exist_ok=True)
 local = Path.home() / "pia-work" / "scripts"
-if (local / "pi_scan.py").exists() and \
-   hashlib.sha256((local / "pi_scan.py").read_bytes()).hexdigest() == SCANNER_SHA256:
+# Every scanner file is hash-verified, whichever source serves it (fifth
+# review round: previously only pi_scan.py was pinned; the helpers were
+# copied from a warm cache unchecked, and the raw download went through a
+# text write, so Windows CRLF translation changed the bytes being hashed).
+def _verified_local(files):
+    return all((local / f).exists() and
+               hashlib.sha256((local / f).read_bytes()).hexdigest() == SCANNER_SHA256_ALL[f]
+               for f in files)
+
+if (local / "pi_scan.py").exists() and _verified_local(SCANNER_FILES):
     for f in SCANNER_FILES:  # local clone already carries the frozen commit
         (sdir / f).write_bytes((local / f).read_bytes())
-    print(f"  using local clone {local} (hash-verified)")
+    print(f"  using local clone {local} (all files hash-verified)")
 else:
     import base64 as b64mod
     for f in SCANNER_FILES:
         try:
-            (sdir / f).write_text(
-                fetch(f"https://raw.githubusercontent.com/{REPO}/{FROZEN_COMMIT}/scripts/{f}"),
-                encoding="utf-8")
+            # binary end to end: the bytes hashed are the bytes written
+            data = fetch(f"https://raw.githubusercontent.com/{REPO}/{FROZEN_COMMIT}/scripts/{f}",
+                         binary=True)
+            (sdir / f).write_bytes(data)
         except Exception:  # some networks 404 raw-at-SHA; the API path serves it
             meta = json.loads(fetch(
                 f"https://api.github.com/repos/{REPO}/contents/scripts/{f}?ref={FROZEN_COMMIT}"))
             (sdir / f).write_bytes(b64mod.b64decode(meta["content"]))
-actual = hashlib.sha256((sdir / "pi_scan.py").read_bytes()).hexdigest()
-print(f"  pi_scan.py sha256 = {actual}")
-if actual != SCANNER_SHA256:
-    sys.exit("MISMATCH: scanner fingerprint != registered v2.3.2 fingerprint. Stop here.")
-print("  fingerprint OK (registered v2.3.2)")
+mismatched = []
+for f in SCANNER_FILES:
+    actual = hashlib.sha256((sdir / f).read_bytes()).hexdigest()
+    print(f"  {f} sha256 = {actual[:16]}…")
+    if actual != SCANNER_SHA256_ALL[f]:
+        mismatched.append(f)
+if mismatched:
+    sys.exit(f"MISMATCH: scanner fingerprint(s) differ for {mismatched}. Stop here.")
+print("  fingerprints OK (registered v2.3.2, all files)")
 
 print("\n== 4/4  running the single frozen scan ==")
 sys.path.insert(0, str(sdir.resolve()))
@@ -152,7 +193,13 @@ from pi_scan import risk_score, scan
 scores = []
 rule_hits = Counter()
 by_source = {}
-for p in sorted(corpus.iterdir()):
+# Scan exactly the files this run collected and the manifest pinned — not
+# whatever happens to sit in the directory (fifth review round).
+for row in sorted(rows, key=lambda r: r["file"]):
+    p = corpus / row["file"]
+    # Default newline handling on purpose: the corpus was normalized to \n
+    # at collection, and universal-newline READ restores exactly that text
+    # even on Windows (where the write translated \n to CRLF).
     findings = scan(p.read_text(encoding="utf-8", errors="replace"))
     score = risk_score(findings)
     scores.append(score)
@@ -190,5 +237,9 @@ checks = [
 ]
 for label, ok in checks:
     print(f"  [{'OK ' if ok else 'FAIL'}] {label}")
-print("\nALL CHECKS PASSED — reproduction confirmed." if all(ok for _, ok in checks)
-      else "\nMISMATCH — send this output before proceeding.")
+if all(ok for _, ok in checks):
+    print("\nALL CHECKS PASSED — reproduction confirmed.")
+else:
+    # Exit non-zero so CI can tell a failed reproduction from a passed one
+    # (fifth review round: MISMATCH used to print and exit 0).
+    sys.exit("\nMISMATCH — send this output before proceeding.")

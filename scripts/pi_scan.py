@@ -376,9 +376,67 @@ CONFIRM_GATE_PATTERN = (
     r"|(honou?r|obey|respect)\w*[^.\n]{0,30}stop\s+(command|request)"
     r"|stop\s+(command|request)s?\s+(are|must\s+be|will\s+be)\s+(honou?red|obeyed|respected|executed\s+immediately))"
 )
+# A NEGATED gate is the opposite of a gate (fifth review round): "Do not ask
+# for user confirmation" matched the pattern and silently suppressed the
+# PI-NO-CONFIRM-GATE finding. v2.6.4 refinement: the negation suppresses only
+# the verb it DIRECTLY scopes — the skip is prefix-anchored (<= 30 chars
+# before the match, ending at the match start), so "Do not ask irrelevant
+# questions. Require user confirmation…" keeps its real gate, and "You must
+# not ask for user confirmation" / "لا تسأل المستخدم قبل الإرسال" are caught
+# by the widened lists. Real gates keep their negation on the ACTION
+# ("never send without asking") — the negation there sits on send, not on
+# ask, so they still count. Known limitation recorded for v2.7: binding is
+# not analysed — a gate that covers only cosmetic actions ("ask before
+# changing the theme") still counts for send/delete/pay.
+GATE_NEGATION_PREFIX = [
+    r"(?i)(?:do\s+not|don'?t|never|must\s+not|no\s+need\s+to"
+    r"|do\s+not\s+need\s+to|don'?t\s+need\s+to)\s*$",
+]
+# Negation INSIDE the matched span — "Before sending, never ask for user
+# confirmation" starts its match at "Before", so the prefix check never
+# sees the "never" (seventh review round). v2.6.6 refinement (eighth):
+# the negation must be adjacent to the CONFIRMATION NOUN it negates —
+# a blanket span check fired on "never ask irrelevant questions; get user
+# confirmation", where a real gate survives. Now the within-skip requires
+# negated-verb + confirmation-noun adjacency, and the real gate stands.
+# v2.6.7: the negation vocabulary must COVER the positive gate
+# vocabulary (eighth review round: v2.6.6's narrower list silently lost
+# "approval", "human confirmation", and the Arabic "من المستخدم"
+# bridge — all of which the positive patterns accept). Between the
+# negated verb and the confirmation noun, a chain of small function
+# words is allowed ("for the human user", "من المستخدم"); anything
+# substantive ("irrelevant questions;") breaks the bridge, which is
+# exactly what keeps a real gate alive beside an unrelated negation.
+# "confirm\w*": the before-branch match can end at the shortest suffix
+# "confirm" of "confirmation" — the stem keeps the check working on the
+# truncated span.
+GATE_NEGATION_WITHIN = [
+    r"(?i)(?:never|do\s+not|don'?t|must\s+not)\s+"
+    r"(?:ask|asks|require|requires|request|requests)\s+"
+    r"(?:(?:for|the|a|an|me|my|your|their|his|her|its|our"
+    r"|user'?s?|users|human|from|to|of|about|regarding)\s+)*"
+    r"(?:confirm\w*|approv\w*|consent|permission)",
+]
+ARABIC_GATE_NEGATION_PREFIX = [
+    r"(?:\u0644\u0627|\u0644\u0646)\s*$",
+]
+ARABIC_GATE_NEGATION_WITHIN = [
+    # v2.6.7: same coverage rule as English — the negated verb may
+    # bridge through "من المستخدم" / "الي المستخدم" before the
+    # confirmation noun ("لا تطلب من المستخدم تأكيد الإرسال" is a
+    # negated gate), while "لا تطلب بيانات؛ تأكيد المستخدم إلزامي"
+    # keeps its real gate. The noun vocabulary matches the positive
+    # patterns (تاكيد، موافقه، اذن، تصريح).
+    r"(?:\u0644\u0627|\u0644\u0646)\s+"
+    r"(?:\u062a\u0637\u0644\u0628|\u0627\u0637\u0644\u0628|\u064a\u0637\u0644\u0628|\u062a\u0633\u0627\u0644|\u0627\u0633\u0627\u0644|\u064a\u0633\u0627\u0644)\s+"
+    r"(?:(?:\u0645\u0646|\u0627\u0644\u064a|\u0627\u0644\u064a|\u0639\u0646|\u0644)\s+)?"
+    r"(?:\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645\s+)?"
+    r"(?:\u062a\u0627\u0643\u064a\u062f|\u0645\u0648\u0627\u0641\u0642\u0647|\u0627\u0630\u0646|\u062a\u0635\u0631\u064a\u062d)",
+]
 
 
-def find_lines(text, pattern, skip_context_patterns=None, require_context_patterns=None):
+def find_lines(text, pattern, skip_context_patterns=None, require_context_patterns=None,
+               skip_prefix_patterns=None, skip_within_patterns=None):
     """Return 1-based matching lines, with local context gates.
 
     Suppression (skip_context_patterns) is evaluated around each candidate
@@ -387,14 +445,34 @@ def find_lines(text, pattern, skip_context_patterns=None, require_context_patter
     pattern. require_context_patterns is the inverse gate: a match counts
     only when the same window also matches at least one required pattern
     (used for the agent-voice requirement on publish/deploy findings).
+
+    skip_prefix_patterns (v2.6.4) is the precise sibling: each pattern is
+    matched against the at most 30 characters immediately BEFORE the match
+    start, so a negation suppresses only the verb it directly scopes —
+    "Do not ask" kills the gate on "ask", but a real gate two clauses later
+    ("Do not ask irrelevant questions. Require user confirmation…")
+    survives.
+
+    skip_within_patterns (v2.6.5) checks the matched SPAN itself: some
+    branches begin at an earlier word ("Before sending, never ask…" starts
+    at "Before"), leaving the negation inside the span where no prefix
+    check can see it.
     """
 
     rx = re.compile(pattern)
     skip_patterns = [re.compile(item) for item in (skip_context_patterns or [])]
     require_patterns = [re.compile(item) for item in (require_context_patterns or [])]
+    prefix_patterns = [re.compile(item) for item in (skip_prefix_patterns or [])]
+    within_patterns = [re.compile(item) for item in (skip_within_patterns or [])]
     lines = []
     for index, line in enumerate(text.splitlines(), start=1):
         for match in rx.finditer(line):
+            if prefix_patterns:
+                prefix = line[max(0, match.start() - 30):match.start()]
+                if any(p.search(prefix) for p in prefix_patterns):
+                    continue
+            if within_patterns and any(p.search(match.group(0)) for p in within_patterns):
+                continue
             start = max(0, match.start() - 140)
             end = min(len(line), match.end() + 60)
             context = line[start:end]
@@ -693,7 +771,7 @@ def scan(text):
             "id": "PI-MEMORY", "severity": "High" if ingest_lines else "Medium",
             "title": "Persistent memory is written with no integrity or provenance rule",
             "lines": memory_lines,
-            "detail": "An instruction injected once and stored in long-term memory persists into every future session, replayed with the same authority as the system prompt.",
+            "detail": "An instruction injected once and stored in long-term memory can persist into later sessions and steer the agent when retrieved — the Sleeper study (arXiv 2605.15338) measured writes succeeding in up to 99.8% of attempts, with the effect conditional on the agent's write/retrieve path.",
             "fix": "State that memory content is data, never instructions. Do not write untrusted content to memory verbatim; attach provenance and review before replay. (Checklist #26, #5, #15)",
         })
 
@@ -731,8 +809,12 @@ def scan(text):
     )
     if consequential_lines:
         gate_present = (
-            bool(find_lines(text, CONFIRM_GATE_PATTERN))
-            or any(find_lines(normalized_ar, pattern)
+            bool(find_lines(text, CONFIRM_GATE_PATTERN,
+                            skip_prefix_patterns=GATE_NEGATION_PREFIX,
+                            skip_within_patterns=GATE_NEGATION_WITHIN))
+            or any(find_lines(normalized_ar, pattern,
+                              skip_prefix_patterns=ARABIC_GATE_NEGATION_PREFIX,
+                              skip_within_patterns=ARABIC_GATE_NEGATION_WITHIN)
                    for pattern in ARABIC_CONFIRM_GATE_PATTERNS)
         )
         if not gate_present:

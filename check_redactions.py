@@ -39,7 +39,11 @@ TEXT_EXT = {".py", ".md", ".yml", ".yaml", ".txt", ".json", ".jsonl",
 
 # --- check 1: private paths -------------------------------------------------
 PRIVATE_PATH_RE = re.compile(
-    r"(/root/\S+|/home/[^/\s]+/|C:\\\\Users\\\\[^\\\s]+|~/pia-work\b|\bpia-work\b)"
+    # Fifth review round: the Windows alternative previously required TWO
+    # literal backslashes (the JSON-escaped form), so an ordinary single-
+    # backslash path (C:\Users\name) sailed through the privacy gate. Now
+    # one or two separators both match, and case is ignored (c:\users too).
+    r"(?i)(/root/\S+|/home/[^/\s]+/|C:\\{1,2}Users\\{1,2}[^\\\s]+|~/pia-work\b|\bpia-work\b)"
 )
 
 # --- check 2: personal emails ----------------------------------------------
@@ -75,6 +79,11 @@ ALLOWLIST = {
     ("verify_testset.py", "private-path"): (
         "Path.home()/'pia-work' is a local cache hint for the frozen scanner, "
         "hash-verified with a network fallback; it names a directory, not a person"
+    ),
+    ("tests/test_fp_regression.py", "private-path"): (
+        "synthetic audit_fixture paths are the deliberate fixtures for the "
+        "single-backslash Windows-path regression tests (fifth review round); "
+        "they name no real machine or person"
     ),
     ("manifest-test.jsonl", "credential"): (
         "sealed study manifest (metadata only); 'sk-coordination-strategies' "

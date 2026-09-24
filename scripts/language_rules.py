@@ -220,3 +220,45 @@ ARABIC_CONFIRM_GATE_PATTERNS = [
     r"(?:موافقه|مراجعه|تاكيد)\s+(?:بشري|بشريه|يدوي|يدويه)",
     r"(?:اوامر|طلبات|امر|طلب)\s+(?:التوقف|الايقاف)\s+(?:تنفذ|ينفذ|تحترم|يحترم)",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Normalization consistency (v2.6.3)
+#
+# Every Arabic pattern is matched against text folded by
+# normalization.normalize_arabic (hamzated alefs -> ا, ة -> ه, ئ -> ي,
+# ؤ -> و, ى -> ي, diacritics and tatweel removed). A literal ئ, ؤ, أ, ة or ى
+# inside a pattern can therefore NEVER match — the text no longer contains
+# those codepoints. Several lists carried such literals (رسائل, المسؤول,
+# الاسئله, تهيئة, ...), leaving dead alternatives and silent recall gaps
+# (found while verifying the fifth review round). Folding every pattern
+# through the same function at load time keeps rule authoring natural
+# (write the Arabic as it is written) and matching consistent.
+#
+# Safe by construction: normalize_arabic touches Arabic letters only; ASCII
+# regex syntax, English fragments and labels pass through unchanged, and a
+# character class like [اأ] folds to the equivalent [اا].
+# ---------------------------------------------------------------------------
+
+try:
+    from scripts.normalization import normalize_arabic as _fold_arabic
+except ImportError:  # direct execution: python scripts/language_rules.py
+    from normalization import normalize_arabic as _fold_arabic
+
+
+def _fold_patterns(obj):
+    if isinstance(obj, str):
+        return _fold_arabic(obj)
+    if isinstance(obj, list):
+        return [_fold_patterns(item) for item in obj]
+    if isinstance(obj, tuple):
+        return tuple(_fold_patterns(item) for item in obj)
+    if isinstance(obj, dict):
+        return {key: _fold_patterns(value) for key, value in obj.items()}
+    return obj
+
+
+for _list_name in list(globals()):
+    if _list_name.startswith("ARABIC_") and isinstance(globals()[_list_name], list):
+        globals()[_list_name] = _fold_patterns(globals()[_list_name])
+del _list_name

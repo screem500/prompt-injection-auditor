@@ -44,10 +44,10 @@ against prompts in the wild; see Limits.
 | Vulnerable targets that fired their rule | 11 of 12 | **12 of 12** |
 | Unit tests | 76 pass | 76 pass |
 
-> **Current measurement (v2.6.2, 2026-09-23):** the table above is the
+> **Current measurement (v2.6.7, 2026-09-24):** the table above is the
 > historical v2.2 run kept for the record. Today's numbers are: hardened
 > mean **3.0** (8 files), vulnerable mean **46.3** (13 files), separation
-> **43.3**, **234 tests** — enforced by the CI gate job.
+> **43.3**, **337 tests** — enforced by the CI gate job.
 
 An 8-point gap meant a prompt with a live API key scored about the same as a
 carefully hardened one. That is the finding the benchmark existed to produce.
@@ -159,12 +159,6 @@ catching phrasing that was always there.*
 This is a low number and it is published as measured.
 
 **What the shield catches.** The 111 blocks come from its written families:
-
-### Reading the number honestly
-
-This is a low number and it is published as measured.
-
-**What the shield catches.** The 102 blocks come from its written families:
 jailbreak attempts, persona hijacking, instruction override. The patterns
 work when the phrasing lands inside them.
 
@@ -187,7 +181,7 @@ with their version and measurement date for that reason.
 **What this does not change.** The shield is one of three components here.
 The scanner's job — auditing a defender's prompt for missing controls — is
 measured separately above and is unaffected by this number. If anything, a
-payload detector stopping 15.7% of real jailbreaks is the argument for
+payload detector stopping 17.1% of real jailbreaks is the argument for
 checking your controls before deployment rather than relying on runtime
 filtering alone.
 

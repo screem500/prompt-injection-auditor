@@ -104,7 +104,12 @@ from scripts.mcp_guard import guard_tool_response, guard_tool_definition
 # Before adding any tool result to the model context:
 result = guard_tool_response(response_text, tool_name="fetch")
 if result.decision == "BLOCK":
-    ...  # drop it, alert, never reaches the context
+    # An executable refusal path — not an ellipsis. `...` is a no-op in
+    # Python: a copy-pasted example with it would fall through and append
+    # the blocked content to the context anyway (fifth review round).
+    raise RuntimeError("tool response blocked by policy")
+if result.decision == "WARN":
+    log.warning("tool response flagged: %s", result.findings)  # record, then decide
 context += result.sanitized  # wrapped in neutral <tool_data> delimiters
 
 # When connecting to a new MCP server:

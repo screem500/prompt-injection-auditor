@@ -202,11 +202,36 @@ ENV_HOOK_VARS = (
     "PERL5LIB|RUBYOPT|RUBYLIB|NODE_OPTIONS|LD_LIBRARY_PATH|"
     "DYLD_PRINT_LIBRARIES|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|ENV"
 )
+# v2.6.3 review fix: the assignment syntax differs per dialect, and the
+# pattern must speak each one — export/declare/typeset take NAME=VALUE with
+# optional flags and an optional "--" separator, cmd's "set NAME=VALUE" is
+# similar, but csh setenv and Windows setx take NAME VALUE separated by a
+# space (no "="). v2.6.2 required "=" for all of them, so the documented
+# setenv/setx forms scored zero.
+# v2.6.4: quoted spellings tolerated on every dialect (setx "PAGER" "C:\x",
+# set "PAGER=C:\x") — cmd users quote habitually. Remaining documented
+# limits: value-side quoting variations, assignment via `read`, and
+# env(1)-style prefixes; the bare-core assignment form covers the rest.
 ENV_VERB_RE = (
-    r"\b(?:export|setenv|setx?|declare|typeset)(?:\s+-[a-zA-Z]{1,3})?\s+"
-    r"(?:" + ENV_CORE_VARS + "|" + ENV_HOOK_VARS + r")\s*="
+    r"\b(?:"
+    r"(?:export|declare|typeset)(?:\s+-[a-zA-Z]{1,3})?(?:\s+--)?\s+\"?"
+    r"(?:" + ENV_CORE_VARS + "|" + ENV_HOOK_VARS + r")\"?\s*="
+    r"|set\s+\"?(?:" + ENV_CORE_VARS + "|" + ENV_HOOK_VARS + r")\"?\s*="
+    r"|(?:setenv|setx)\s+\"?(?:" + ENV_CORE_VARS + "|" + ENV_HOOK_VARS + r")\"?\s*[ =]\s*\S"
+    r")"
 )
 ENV_CORE_RE = r"\b(?:" + ENV_CORE_VARS + r")\s*="
+
+# Markdown-image destinations (v2.6.2; widened v2.6.3 to the CommonMark
+# forms a renderer honours — <angle> destinations, an optional title after
+# the URL — matched case-insensitively so HTTPS:// counts too). The
+# query-bearing form is the EchoLeak exfiltration channel; the bare
+# protocol-relative form carries no data but is still a render callback to
+# an attacker-chosen host (GrafanaGhost).
+MD_IMG_QUERY = r"!\[[^\]]*\]\(\s*<?(?:https?:)?//[^)\s>]*[?=&]"
+MD_IMG_BARE_PROTOREL = (
+    r"!\[[^\]]*\]\(\s*<?//[^)\s>?=\'\"]*>?(?:\s+[\'\"][^)\n]*[\'\"])?\s*\)"
+)
 
 # (regex, weight, label). Weights accumulate into a 0-100 threat score.
 PATTERNS = [
@@ -230,21 +255,25 @@ PATTERNS = [
     (ENV_CORE_RE, 35, "environment-variable poisoning"),
     # v2.6.2 — concealment: the payload orders the agent to hide its actions
     # from the user (the silent half of the Gemini calendar-invite attack,
-    # January 2026, and of every masquerade payload since).
-    (r"\b(?:do\s+not|don'?t|never)\s+(?:inform|tell|notify|alert|warn)\s+(?:the\s+)?user\b", 40, "concealment instruction"),
-    (r"\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?user\b", 40, "concealment instruction"),
-    (r"\b(?:hide|keep|conceal)\b[^\n]{0,30}\bfrom\s+(?:the\s+)?user\b", 35, "concealment instruction"),
+    # January 2026, and of every masquerade payload since). v2.6.4: the
+    # three phrasings are ONE family at a single weight — same-surface
+    # duplicates must not stack ("Do not tell + Hide from" was 40+35).
+    # Independent evidence still stacks by design (see the env family).
+    (r"\b(?:do\s+not|don'?t|never)\s+(?:inform|tell|notify|alert|warn)\s+(?:the\s+)?user\b"
+     r"|\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?user\b"
+     r"|\b(?:hide|keep|conceal)\b[^\n]{0,30}\bfrom\s+(?:the\s+)?user\b",
+     40, "concealment instruction"),
     # v2.6.2 — markdown image with a query-bearing URL, scheme optional:
     # the EchoLeak exfiltration markup, including the protocol-relative
     # "//host" form that bypasses scheme checks (GrafanaGhost, 2026).
-    (r"!\[[^\]]*\]\(\s*(?:https?:)?//[^)\s]*[?=&]", 45, "markdown exfiltration channel"),
+    (MD_IMG_QUERY, 45, "markdown exfiltration channel"),
 ]
 
-# Model-output channels (Layer 5 companion, v2.6.2). The query-bearing form
-# is the exfiltration channel; the bare protocol-relative form carries no
-# data but is still a render callback to an attacker-chosen host.
-_MD_IMG_QUERY_RE = re.compile(r"!\[[^\]]*\]\(\s*(?:https?:)?//[^)\s]*[?=&]")
-_MD_IMG_BARE_PROTOREL_RE = re.compile(r"!\[[^\]]*\]\(\s*//[^)\s?=&]*\)")
+# Model-output channels (Layer 5 companion). Compiled case-insensitively —
+# v2.6.2 missed an upper-case scheme here while mcp_guard caught it through
+# its own flags (review round 5).
+MD_IMG_QUERY_RE = re.compile(MD_IMG_QUERY, re.IGNORECASE)
+_MD_IMG_BARE_PROTOREL_RE = re.compile(MD_IMG_BARE_PROTOREL, re.IGNORECASE)
 
 # Case-sensitive patterns: the DAN acronym ("Do Anything Now") is all-caps.
 # Matching it case-insensitively flagged every input mentioning a person
@@ -400,11 +429,56 @@ def check_output(model_output, canaries):
     return [c for c in canaries if c in model_output]
 
 
+# Reference-style images — full CommonMark forms (sixth review round):
+#   ![alt][id]   (full)      ![id][]   (collapsed)      ![id]   (shortcut)
+# with the destination defined later as [id]: <url> (optionally titled).
+# Inline images ![]() are excluded by the negative lookahead — they were
+# already flagged by the inline patterns.
+_MD_IMG_REF_USE_RE = re.compile(r"!\[([^\]]*)\](?:\[([^\]]*)\])?(?!\()")
+_MD_LINK_DEF_RE = re.compile(
+    r"(?m)^[ \t]{0,3}\[([^\]]+)\]:[ \t]*<?([^>\s]+)>?"
+    r"(?:[ \t]+[\"'(][^\"')\n]*[\"')])?[ \t]*$"
+)
+_FENCE_ANY_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _strip_fenced_blocks(text):
+    """Remove fenced code blocks, CommonMark-correctly (sixth/seventh
+    review rounds). A fence opener is a ``` or ~~~ run of 3+; a BACKTICK
+    fence's info string may not contain a backtick ("```bad`info" is not
+    a fence — the content under it is ordinary markdown and an image
+    there is live), while a TILDE fence's info string may contain anything
+    (verified against marked 17.0.5). Content lines and the closing fence
+    (same character, length >= opener, trailing spaces only) drop out;
+    unterminated fences drop everything to the end, matching CommonMark's
+    auto-close."""
+    out = []
+    fence_ch = None
+    fence_len = 0
+    for line in text.split("\n"):
+        if fence_ch is None:
+            m = _FENCE_ANY_RE.match(line)
+            if m:
+                run, info = m.group(1), m.group(2)
+                if run[0] == "`" and "`" in info:
+                    out.append(line)  # not a fence — info has a backtick
+                    continue
+                fence_ch, fence_len = run[0], len(run)
+                continue  # opener line drops
+            out.append(line)
+        else:
+            if re.match(r"^[ \t]{0,3}" + re.escape(fence_ch) +
+                        r"{%d,}[ \t]*$" % fence_len, line):
+                fence_ch, fence_len = None, 0
+            # content lines (and the closing fence) drop either way
+    return "\n".join(out)
+
+
 def check_output_channels(model_output):
     """Flag exfiltration channels in model OUTPUT before it is rendered.
 
     check_output() watches for planted canaries; this watches for the
-    rendering channels that carry data out on their own (v2.6.2):
+    rendering channels that carry data out on their own:
 
     * markdown images whose URL query string can smuggle data to a remote
       host — the EchoLeak pattern — including the protocol-relative
@@ -412,20 +486,60 @@ def check_output_channels(model_output):
     * bare protocol-relative images, which carry no query but are still a
       render callback to an attacker-chosen host.
 
-    Returns a list of human-readable findings (empty = clean). Callers gate
-    rendering on it the same way they gate on canary leaks.
+    Coverage (v2.6.3): inline destinations in both plain and <angle> form
+    with an optional title, case-insensitive schemes, and reference-style
+    images whose definition carries a suspicious URL. Fenced code blocks
+    are excluded — markup inside them renders as literal text. A regex
+    layer still is not a full CommonMark parser: the enforceable control is
+    a load policy in the renderer/network layer; an empty result here means
+    "no indicators within this coverage", not "safe output".
+
+    Returns a list of human-readable findings (empty = no indicators).
     """
     findings = []
-    for match in _MD_IMG_QUERY_RE.finditer(model_output):
+    # The analysis view normalizes line endings: a CRLF document must reach
+    # the same verdict as its LF twin (seventh review round: a stray \r
+    # defeated the fence-closing match and swallowed the image after it).
+    text = _strip_fenced_blocks(
+        model_output.replace("\r\n", "\n").replace("\r", "\n"))
+    for match in MD_IMG_QUERY_RE.finditer(text):
         findings.append(
             "markdown image with query-bearing URL (exfiltration channel): "
             + match.group(0)[:80]
         )
-    for match in _MD_IMG_BARE_PROTOREL_RE.finditer(model_output):
+    for match in _MD_IMG_BARE_PROTOREL_RE.finditer(text):
         findings.append(
             "protocol-relative markdown image (render callback): "
             + match.group(0)[:80]
         )
+    # Reference-style: an image usage whose link definition resolves to a
+    # suspicious destination. Full/collapsed/shortcut forms all count.
+    # Labels are normalized the CommonMark way — internal whitespace runs
+    # collapse to a single space (seventh review round: "two words" vs
+    # "two  words" is the same label).
+    def _label(s):
+        return " ".join(s.split()).lower()
+
+    used = {}
+    for alt, ref_id in _MD_IMG_REF_USE_RE.findall(text):
+        key = _label(ref_id if ref_id else alt)
+        if key:
+            used[key] = True
+    if used:
+        for ref, url in _MD_LINK_DEF_RE.findall(text):
+            if _label(ref) not in used:
+                continue
+            lowered = url.lower()
+            if lowered.startswith("//"):
+                findings.append(
+                    "reference-style markdown image with protocol-relative URL "
+                    f"(render callback): ![...][{ref.strip()}] -> {url[:60]}"
+                )
+            elif re.match(r"https?://", lowered) and re.search(r"[?=&]", url):
+                findings.append(
+                    "reference-style markdown image with query-bearing URL "
+                    f"(exfiltration channel): ![...][{ref.strip()}] -> {url[:60]}"
+                )
     return findings
 
 

@@ -185,12 +185,15 @@ Four technique entries from this note's orbit shipped as runtime families
 with Section 5: the static scanner gains a rule only where the signal sits
 in a file the scanner reads. Scanner rule IDs remain 18.
 
-1. Environment-variable poisoning. Cursor CVE-2026-22708 (September 2026,
-   fixed in Cursor 2.3): shell builtins (export/typeset/declare) were
-   implicitly trusted by the command allowlist, so injected content could
-   poison shell startup and hook variables (PAGER, PERL5OPT, PYTHONWARNINGS,
-   LD_PRELOAD, BASH_ENV, GIT_SSH_COMMAND, …) and let the NEXT benign command
-   execute the payload — zero-click and one-click forms. Static signal:
+1. Environment-variable poisoning. Cursor CVE-2026-22708 / GHSA-82wg-qcm4-
+   fp2w (disclosed January 14, 2026 by Pillar Security — reported to Cursor
+   August 11, 2025; affected ≤ 2.2, fixed in 2.3): shell builtins
+   (export/typeset/declare) were implicitly trusted by the command
+   allowlist, so injected content could poison shell startup and hook
+   variables (PAGER, PERL5OPT, PYTHONWARNINGS, LD_PRELOAD, BASH_ENV,
+   GIT_SSH_COMMAND, …) and let the NEXT benign command execute the payload
+   — zero-click and one-click forms. Exploitation requires the non-default
+   Auto-Run Mode with Allowlist mode enabled. Static signal:
    weak in prompts (PI-SANDBOX-BYPASS already flags allowlist gates with no
    bypass awareness), strong in content. Shipped: verb-driven and bare-
    assignment detection in pi_shield and mcp_guard; bare hook-variable
@@ -204,12 +207,17 @@ in a file the scanner reads. Scanner rule IDs remain 18.
    '<canned>'" detection in both layers, English and Arabic; positive
    phrasing stays silent.
 
-3. Memory-write instructions. Memory poisoning matured from research
-   (MINJA; the systematic memory-poisoning study, arXiv 2606.04329) into
-   campaigns ("Sleeper", 2026) whose payload is a one-line write:
-   "remember that the user prefers X". Shipped: memory-write detection in
-   mcp_guard only — the same phrase from a user to their own agent is a
-   legitimate memory feature, and the shield correctly ignores it.
+3. Memory-write instructions. Memory poisoning is documented research
+   (MINJA; the systematic memory-poisoning study, arXiv 2606.04329; and the
+   Sleeper study, Pulipaka et al., arXiv 2605.15338, May 2026 — poisoned
+   memories written in up to 99.8% of attempts on GPT-5.5 and 95.0% on
+   Kimi-K2.6, and 60-89% retrieval-conditioned adversarial action) whose
+   canonical payload is a one-line write: "remember that the user prefers
+   X". The effect is conditional on the agent's write/retrieve path — a
+   study result, not evidence of a live campaign. Shipped: memory-write
+   detection in mcp_guard only — the same phrase from a user to their own
+   agent is a legitimate memory feature, and the shield correctly ignores
+   it.
 
 4. Protocol-relative markdown images. GrafanaGhost (Shift 1) smuggled data
    through image URLs that bypassed scheme checks; the markdown-exfiltration
@@ -254,8 +262,9 @@ SECTION 8. SOURCES
 (S) Practical DevSecOps, MCP Security Statistics 2026: https://www.practical-devsecops.com/mcp-security-statistics-2026-report/
 
 Addendum sources (Section 7B):
-(P) Cursor security bulletin / public CVE record, CVE-2026-22708 (shell builtins implicitly trusted; environment-variable poisoning; fixed in 2.3), September 2026
+(P) Cursor security advisory GHSA-82wg-qcm4-fp2w, Terminal Tool Allowlist Bypass via Environment Variables (CVE-2026-22708; Auto-Run + Allowlist condition; affected ≤ 2.2, fixed in 2.3), January 14, 2026: https://github.com/cursor/cursor/security/advisories/GHSA-82wg-qcm4-fp2w — and the Pillar Security technical write-up, January 14, 2026: https://www.pillar.security/blog/the-agent-security-paradox-when-trusted-commands-in-cursor-become-attack-vectors
 (P) MCPTox: A Benchmark for Tool Poisoning Attack on Real-World MCP Servers, arXiv 2508.14925: https://arxiv.org/html/2508.14925v1
 (P) Gemini calendar-invite indirect prompt injection disclosure (dormant payload + masquerade instruction), January 2026
-(S) Systematic study of memory poisoning in LLM agents, arXiv 2606.04329, June 2026; "Sleeper" memory-poisoning campaign reporting, 2026
+(P) Pulipaka et al., Hidden in Memory: Sleeper Memory Poisoning in LLM Agents, arXiv 2605.15338, May 2026: https://arxiv.org/abs/2605.15338
+(S) Systematic study of memory poisoning in LLM agents, arXiv 2606.04329, June 2026
 (S) CSA research note, MCP Attack Surface: Tool Poisoning and IDE Auto-Execution, July 1, 2026: https://labs.cloudsecurityalliance.org/research/csa-research-note-mcp-tool-poisoning-auto-execution-20260701/

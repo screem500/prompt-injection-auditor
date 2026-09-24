@@ -106,7 +106,7 @@ prompt-injection-auditor/
 │   ├── test_normalization.py       # Arabic normalization unit tests (v2.1)
 │   ├── test_english_regression.py  # English regression guard
 │   ├── test_confirm_gate.py        # 14-case confirmation-gate suite (v2.6)
-│   ├── test_fp_regression.py       # 93-case false-positive regression suite (v2.6.2)
+│   ├── test_fp_regression.py       # 196-case false-positive regression suite (v2.6.7)
 │   ├── test_docs_sync.py           # doc-drift guard: inventory, bilingual twins, SKILL.md refs, test count (v2.6)
 │   └── test_cli.py                 # CLI end-to-end tests
 ├── check_redactions.py            # pre-publish sweep: private paths, emails, live-looking credentials (v2.6.1)
@@ -132,6 +132,62 @@ prompt-injection-auditor/
 - `VALIDATION.md` — precision measurement: method, results, limits
 
 Run the full test suite with `python -m unittest discover tests`.
+
+### New in v2.6.7 — ninth-round parity pass
+
+The ninth review closed the eighth round's remaining items and kept scope tight, per its own recommendation (`tests/test_fp_regression.py`, 6 new cases):
+
+- **Negation-vocabulary parity**: the gate-negation check now covers the reported regressions and their tested counterparts — "never ask for user **approval**", "…**human** confirmation", "لا تطلب **من المستخدم** تأكيد…" fire the finding again (v2.6.6 had silently regressed them), with the verb→noun bridge allowing the same function words as the positive side. The positive and negation patterns remain separate code; the tests prove these cases, not equivalence for every phrasing. Accumulated gate matrix: 21 cases, all passing.
+- **Test hardening**: the C1/ZWSP CLI runs now assert full success conditions (a crash can't pass on absent bytes), and the "unicode-escaped" fixture contains real `\uNNNN` sequences proven to decode.
+- **Log wording**: acceptance wording, "byte-for-byte" scope, and the escaping claim corrected to what the reviews actually found.
+- Benchmark unchanged (3.0 / 46.3 / 43.3); garak unchanged (111/135/404) — sixth consecutive stable measurement. 337 tests (196 in the regression suite).
+
+### New in v2.6.6 — eighth-round regression sweep
+
+The eighth review confirmed v2.6.5's specific fixes and matched the published metrics (322 tests green on Windows), then caught two regressions that v2.6.5's own fixes had introduced plus a residual display-safety gap — fixed here with attack-side and benign-side tests, no scope expansion, per its recommendation (`tests/test_fp_regression.py`, 9 new cases):
+
+- **JSON string roots restored**: a document that IS a string (`json.dumps("…")`) parses and scans again — v2.6.5 had dropped it to ALLOW 0; malformed documents no longer wear a "limits" note (syntax failure ≠ resource failure).
+- **Gate negation binds to the noun**: "never ask irrelevant questions; **get user confirmation**" keeps its real gate; only a negated ask carrying the confirmation ("never ask for user confirmation" / "لا تطلب تأكيد…") suppresses — EN + AR, all ten historical gate cases re-verified.
+- **Display escaping is categorical**: every input character whose Unicode class starts with C (C1 OSC forms, ZWSP, ZWJ, bidi marks) renders as a visible escape inside finding paths — input payloads can no longer smuggle control bytes into diagnostic output.
+- **Crash-proof CLI test**: asserts the report exists, forbids tracebacks, and adds C1/ZWSP fixtures.
+- Benchmark unchanged (3.0 / 46.3 / 43.3); garak unchanged (111/135/404) — fifth consecutive stable measurement. 331 tests (190 in the regression suite).
+
+### New in v2.6.5 — seventh-round precision pass
+
+The seventh review verified v2.6.4 (304 tests green on Windows) and then corrected one of our own claims: the v2.6.4 "CLI leak not reproduced" paragraph was wrong — the leak reproduces with valid JSON (our test had used invalid JSON and missed the path). Fixed, with the reviewer's exact fixture as a regression test (`tests/test_fp_regression.py`, 18 new cases):
+
+- **Display-safe finding paths**: control characters are escaped at every JSON-key embedding — zero raw OSC sequences reach CLI stdout.
+- **JSON robustness completed**: shape checks on the whitespace-stripped view (leading space defeated the depth guard), `guard_tool_definition` re-serialization crash-proofed, full single-pass escape decoding on the fallback (`\n`-deep payloads now seen), and honest notes (plain text no longer labeled "exceeds limits").
+- **Span-level gate negation**: "Before sending, never ask…" / "قبل إرسال الرسائل لا تطلب…" no longer count as gates.
+- **Markdown parity**: CRLF == LF verdicts, tilde fences accept any info string (marked-parity), CommonMark label whitespace collapsing, and decoded blobs now cross the raw terminal-signal layer (base64/hex OSC 8 blocked).
+- Benchmark unchanged (3.0 / 46.3 / 43.3); garak unchanged (111/135/404) — fourth consecutive stable measurement. 322 tests.
+
+### New in v2.6.4 — precision fixes after the archive-level review
+
+The sixth review round examined the shipped v2.6.3 zip itself and confirmed its fixes and measurements, then caught one CI-blocker and six precision issues — all reproduced locally and fixed (`tests/test_fp_regression.py`, 24 new cases):
+
+- **Windows CI restored**: the round-5 CR test used a hardcoded `/tmp` path (279/280 on Windows); tempfile now.
+- **Encoded payloads fully equivalent**: decoded blobs fold through the same normalization as direct input — diacritized/fullwidth/zero-wrapped payloads no longer pass as base64 at 0.
+- **JSON limits completed**: deterministic depth guard, huge-integer `ValueError` caught, `guard_tool_definition` hardened, `\uNNNN`-escaped payloads still seen on the fallback path.
+- **Gate negation prefix-scoped**: a real gate later on the same line survives; `must not ask` / `لا تسأل` count as negations; stable across line wraps.
+- **CommonMark-correct fences** (` ```bad\`info` is not a fence) and complete reference-image forms (collapsed/shortcut/titled).
+- **Concealment = one family, one weight** on the same surface; independent evidence (env) still stacks by design; quoted env dialects (`setx "PAGER" "C:\path"`).
+- Original review item #10 (surface-vs-control inference) is **explicitly deferred to v2.7** — stated, not silently absorbed.
+- Benchmark unchanged (3.0 / 46.3 / 43.3); garak unchanged (111/135/404, 37.8%). 304 tests.
+
+### New in v2.6.3 — review-driven hardening of the runtime layers
+
+An external cross-suite review of the tagged v2.6.2 reproduced thirteen findings; twelve were verified locally and fixed with attack-side + benign-side tests (`tests/test_fp_regression.py`, 46 new cases) — the thirteenth (scanner surface-vs-control inference) is explicitly deferred to v2.7 and recorded as such in the CHANGELOG:
+
+- **Tool-name injection** closed: names are reduced to `[A-Za-z0-9._-]` before they touch the wrapper's attribute.
+- **JSON keys scanned and sanitized** — a payload in a property *name* previously reached the model at ALLOW 0.
+- **Markdown grammar widened** to the CommonMark forms renderers honour (`HTTPS://`, `<angle>` destinations, titles, reference-style images), with fenced code blocks excluded from the render gate.
+- **Hostile JSON depth** fails over to a plain-text scan — never a crash, never a silent pass.
+- **Decoded base64/hex blobs** now cross the full surface (base + MCP + Arabic), one decode level deep.
+- **Negated confirmation requests** ("Do not ask for user confirmation" / "لا تطلب تأكيد المستخدم") no longer count as a confirmation gate.
+- Plus: family-dedup escalation fix, setenv/setx/export `--` dialects, the خزن spelling, load-time folding of every Arabic pattern (dead ئ/ؤ/ى literals eliminated), and hardened measurement tooling (raw-byte benchmark reads, fully pinned scanner hashes, non-zero exit on mismatch).
+- Documentation corrections from the same review: CVE-2026-22708 dated January 14, 2026 with its Auto-Run + Allowlist condition; Sleeper framed as the study it is; VALIDATION/RESULTS arithmetic cleaned up.
+- Benchmark unchanged (3.0 / 46.3 / 43.3); garak unchanged (111/135/404, noticed 37.8%). 280 tests.
 
 ### New in v2.6.2 — incident-driven runtime families
 
@@ -204,7 +260,9 @@ from scripts.mcp_guard import guard_tool_response
 
 result = guard_tool_response(response_text, tool_name="fetch")
 if result.decision == "BLOCK":
-    ...  # reject before it reaches the model context
+    raise RuntimeError("tool response blocked by policy")  # never reaches the model context
+# decision == "WARN": pass result.sanitized, but log result.findings
+context += result.sanitized
 ```
 
 Proven by a 20-case suite: `python -m unittest tests.test_mcp_guard`.
@@ -213,7 +271,7 @@ Note: mcp_guard.py here is unrelated to General-Analysis/mcp-guard — the overl
 
 ### New in v2.0 — pi_shield (defense layer)
 
-The auditor finds weaknesses; **pi_shield blocks them**. A five-layer input-defense middleware: unicode/homoglyph normalization, safe delimiting with closing-tag neutralization, weighted threat scoring (ALLOW/WARN/BLOCK), base64/hex payload inspection, and canary leak detection. Defeats the evasion techniques that break naive filters — closing-tag escapes, zero-width characters, Cyrillic homoglyphs, encoded commands — proven by an 11-case test suite (`python -m unittest tests.test_shield`). Since v2.6.2 the scoring layer also covers environment-variable poisoning and concealment phrasing, and a Layer 5 companion — `check_output_channels(model_output)` — flags exfiltration markup (query-bearing or protocol-relative markdown images) in model output before rendering.
+The auditor finds weaknesses; **pi_shield flags and gates them**. A five-layer input-defense middleware: unicode/homoglyph normalization, safe delimiting with closing-tag neutralization, weighted threat scoring (ALLOW/WARN/BLOCK), base64/hex payload inspection, and canary leak detection. It detects the evasion techniques that break naive filters — closing-tag escapes, zero-width characters, Cyrillic homoglyphs, encoded commands — proven by an 11-case test suite (`python -m unittest tests.test_shield`). "Gates" is a decision, not enforcement: the caller must act on BLOCK/WARN (see the integration example above); the library detects and returns a verdict, the harness enforces it. Since v2.6.2 the scoring layer also covers environment-variable poisoning and concealment phrasing, and a Layer 5 companion — `check_output_channels(model_output)` — flags exfiltration markup (query-bearing or protocol-relative markdown images) in model output before rendering.
 
 ### Severity model
 
