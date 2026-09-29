@@ -232,12 +232,12 @@ and the movement is entirely the new families catching phrasing already
 present in the corpus. Scanner benchmark unchanged (3.0 / 46.3 / 43.3).
 
 Still open from Section 6, unchanged: skill-file linter mode (Step 2),
-PI-EXTERNAL-INSTRUCTIONS / PI-DROPPER (entries 2.1, 2.3), mcp_guard tool-
-description pinning against rug pulls (entry 2.8 / MCP03) — now the most
-evidence-backed remaining item, with Microsoft's June 2026 guidance
-(signed tool manifests, metadata scanning) and the MCPTox benchmark
-(45 live servers, 20 agents, average tool-poisoning ASR 36.5 percent,
-arXiv 2508.14925) as the measurement baseline to beat.
+PI-EXTERNAL-INSTRUCTIONS / PI-DROPPER (entries 2.1, 2.3). mcp_guard tool-
+description pinning against rug pulls (entry 2.8 / MCP03) shipped in
+v2.7.0 (SHA-256 pins at approval, re-verified per connection, drift
+alerts with both digests) — with Microsoft's June 2026 guidance and the
+MCPTox benchmark (45 live servers, 20 agents, average tool-poisoning
+ASR 36.5 percent, arXiv 2508.14925) as the evidence base.
 
 
 SECTION 8. SOURCES

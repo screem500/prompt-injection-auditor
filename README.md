@@ -106,7 +106,7 @@ prompt-injection-auditor/
 │   ├── test_normalization.py       # Arabic normalization unit tests (v2.1)
 │   ├── test_english_regression.py  # English regression guard
 │   ├── test_confirm_gate.py        # 14-case confirmation-gate suite (v2.6)
-│   ├── test_fp_regression.py       # 196-case false-positive regression suite (v2.6.7)
+│   ├── test_fp_regression.py       # 221-case false-positive regression suite (v2.7.3)
 │   ├── test_docs_sync.py           # doc-drift guard: inventory, bilingual twins, SKILL.md refs, test count (v2.6)
 │   └── test_cli.py                 # CLI end-to-end tests
 ├── check_redactions.py            # pre-publish sweep: private paths, emails, live-looking credentials (v2.6.1)
@@ -132,6 +132,29 @@ prompt-injection-auditor/
 - `VALIDATION.md` — precision measurement: method, results, limits
 
 Run the full test suite with `python -m unittest discover tests`.
+
+### New in v2.7.3 — pin validation anchored exactly
+
+The thirteenth round's two small edits: digest validation uses `fullmatch` (a trailing `\n` used to pass `$` at 65 characters and trigger a false CHANGED alert plus a store rewrite), and the `server` field is required — explicit `""` for default-scope pins stays legal, absence is refused. Both refusals leave store bytes untouched. 361 tests; benchmark and garak unchanged.
+
+### New in v2.7.2 — store-validation completed, packaging restored
+
+The twelfth round verified the v2.7.1 fixes (including a real two-process lock-ordering test) and completed the store contract: every pin entry is validated in full — 64-char lowercase-hex digest, field types, ISO-8601 timestamp, key consistency — and the whole store is refused without touching a byte of it; a crafted non-hex digest can no longer reach the terminal through report output either. Packaging: v2.7.1's archive had dropped `.github/workflows/tests.yml` and `.gitignore` to an over-broad exclusion pattern; the exclusion is surgical now and the full zip matches the patch-over-v2.7.0 tree. 358 tests; benchmark and garak unchanged.
+
+### New in v2.7.1 — pin-store hardening after review
+
+The tenth round's three pin-layer findings, each reproduced before fixing: corrupted store entries (a `"srv/fetch": null` pin) are refused instead of silently re-pinned; untrusted tool names can no longer smuggle ESC/C1/ZWSP into CLI output (categorical escaping, same rule as finding paths); concurrent pin operations serialize on a cross-platform lock across the whole read-modify-write, so two servers pinned at once both survive. Packaging fixed: distribution zips exclude `.git`. 352 tests; benchmark and garak unchanged.
+
+### New in v2.7.0 — tool-definition pinning (anti rug-pull, MCP03)
+
+The quietest tool-poisoning variant is a server changing a tool's description or schema *after* approval — the name stays trusted, the content turns hostile, no single scan can see it. New in `mcp_guard.py` (`tests/test_fp_regression.py`, 11 new cases):
+
+- `pin_tool_definitions(tools, store_path, server="")` — SHA-256 pin of every tool definition's canonical form at approval.
+- `verify_tool_pins(tools, store_path, server="")` — re-verify on every (re)connection: any drift (including invisible-character edits) is a rug-pull alert with both digests and the pin timestamp; new tools and vanished tools are reported; drift at pin time is never silently re-pinned.
+- Caller-owned JSON store, atomic writes, versioned, refuses corrupted input — like SSH `known_hosts`, it must live where servers cannot write it.
+- CLI: `--pin-defs tools.json --store pins.json [--server NAME]` / `--verify-defs …` (exit 0 clean, 2 new/drift-at-pin, 3 rug pull).
+
+Benchmark unchanged (3.0 / 46.3 / 43.3); garak unchanged (111/135/404). 348 tests.
 
 ### New in v2.6.9 — CI matrix closed for real: behavior-driven tests
 

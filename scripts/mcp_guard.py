@@ -24,6 +24,11 @@ On top of pi_shield's five layers, this guard catches tool-channel attacks:
   * Arabic injection phrases (reuses the v2.1 language rules)
   * encoded payloads (base64/hex blobs, decoded then scanned)
 
+Since v2.7.0 it also defeats rug pulls (OWASP MCP03):
+pin_tool_definitions / verify_tool_pins hash every tool definition at
+approval and re-verify on every (re)connection, alerting on ANY drift —
+the approved-yesterday vs presented-today gap a single scan cannot see.
+
 Tool responses are JSON-aware: every string value is scanned and findings are
 reported with their JSON path.
 
@@ -36,11 +41,15 @@ No third-party dependencies. Python 3.8+.
 """
 
 import base64
+import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 # Reuse pi_shield's battle-tested layers. Works both when imported as
 # scripts.mcp_guard (tests, repo root) and when run directly (CLI).
@@ -715,12 +724,337 @@ def guard_tool_definition(tool, warn_at=30, block_at=60):
 
 
 # ---------------------------------------------------------------------------
+# Tool-definition pinning (anti rug-pull, OWASP MCP03)
+# ---------------------------------------------------------------------------
+# A rug pull is a server changing a tool's description or schema AFTER the
+# user approved it: the tool name stays trusted, the content turns hostile,
+# and no single scan can see it — yesterday's scan approved a different
+# document than today's. The control is time (Microsoft's June 2026 MCP
+# guidance: signed manifests / content pinning; the MCPTox benchmark showed
+# an average 36.5% attack-success rate against unpinned tool poisoning):
+# hash the definition at approval, re-verify on every (re)connection, and
+# alert on ANY drift from what was pinned — including invisible-character
+# edits, which change the digest even when the rendered text looks identical
+# (guard_tool_definition separately scans content for hostility).
+#
+# The pin store is a JSON document the CALLER owns. Like SSH known_hosts,
+# it must live where the connected servers cannot write it: a server that
+# can rewrite its own pins can rug-pull the pin file too. Pinning protects
+# the channel against network content, not against a compromised operator
+# seat — say so wherever the feature is documented. Since v2.7.1: every
+# pin entry is validated on load (a null or malformed pin is refused, never
+# an excuse to re-pin silently), and concurrent pin operations serialize on
+# a sibling .lock file (POSIX flock / Windows msvcrt) across the whole
+# read-modify-write cycle.
+
+_PIN_FORMAT = 1
+
+
+def _canonical_definition(tool):
+    """Deterministic serialization for hashing: sorted keys, tight
+    separators, one canonical form per definition. Unparseable strings
+    hash as-is."""
+    if isinstance(tool, str):
+        view = tool.lstrip()
+        try:
+            if view[:1] in "{[" and _json_nesting_depth(view) <= _MAX_JSON_DEPTH:
+                tool = json.loads(view)
+        except (ValueError, TypeError, RecursionError):
+            pass  # unparseable: hash the raw string
+    return json.dumps(tool, sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":"), default=str)
+
+
+def definition_digest(tool):
+    """SHA-256 of the canonical form — the value a pin records."""
+    return hashlib.sha256(_canonical_definition(tool).encode("utf-8")).hexdigest()
+
+
+@dataclass
+class PinReport:
+    server: str = ""
+    pinned: list = field(default_factory=list)     # names pinned this call
+    unchanged: list = field(default_factory=list)  # digest matches the pin
+    changed: list = field(default_factory=list)    # dicts: name, old_digest, new_digest, pinned_at
+    new: list = field(default_factory=list)        # presented but never pinned
+    missing: list = field(default_factory=list)    # pinned but not presented
+
+
+def _pin_key(server, name):
+    return f"{server}/{name}" if server else name
+
+
+def _load_pin_store(store_path):
+    path = os.fspath(store_path)
+    if not os.path.exists(path):
+        return {"format": _PIN_FORMAT, "pins": {}}
+    with open(path, encoding="utf-8") as fh:
+        store = json.load(fh)
+    if not isinstance(store, dict) or not isinstance(store.get("pins"), dict):
+        raise ValueError(
+            f"pin store {path} is not a pinning store (missing 'pins' object) — "
+            "refusing to reset it silently; move it aside and re-pin if intentional")
+    if store.get("format") != _PIN_FORMAT:
+        raise ValueError(f"pin store {path} has unsupported format {store.get('format')}")
+    # v2.7.1 (eleventh review round): validate every ENTRY. A null or
+    # malformed pin ("srv/fetch": null) used to read as "no pin" and the
+    # presented definition was silently re-pinned and trusted — exactly
+    # the silent-reset contract the store promises against.
+    # v2.7.2 (twelfth review round): complete the contract. A pin holding
+    # ONLY a well-formed digest was accepted: the missing-report logic
+    # depends on the absent "server" field (a pinned tool vanished from
+    # the missing list), and a later pin rewrote the file. A 64-character
+    # NON-HEX digest was accepted too, and its stored bytes reached the
+    # terminal raw through the changed-report display. Every entry is now
+    # validated in full — hex digest, field types, ISO timestamp, and key
+    # consistency — and the whole store is refused without touching a
+    # byte of it.
+    # v2.7.3 (thirteenth review round): fullmatch, not match with $ — a
+    # digest followed by a trailing newline measured 65 characters and
+    # PASSED $ (which also matches before a final \n), producing a false
+    # CHANGED alert and a store rewrite. And "server" must EXIST: the
+    # field may be the explicit empty string (default-scope pins), but
+    # its absence is not the same thing.
+    hex64 = re.compile(r"[0-9a-f]{64}")
+    for key, pin in store["pins"].items():
+        if not isinstance(pin, dict):
+            raise ValueError(
+                f"pin store {path} has a malformed pin entry {key!r} — refusing "
+                "to load it; a null or corrupt pin is never an excuse to re-pin")
+        digest = pin.get("digest")
+        if not isinstance(digest, str) or not hex64.fullmatch(digest):
+            raise ValueError(
+                f"pin store {path} entry {key!r} has a digest that is not exactly "
+                "64 lowercase hex characters — refusing to load it")
+        name = pin.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                f"pin store {path} entry {key!r} has no valid name — refusing")
+        if "server" not in pin or not isinstance(pin["server"], str):
+            raise ValueError(
+                f"pin store {path} entry {key!r} is missing its server field "
+                "(explicit '' is allowed, absence is not) — refusing")
+        pin_server = pin["server"]
+        pinned_at = pin.get("pinned_at")
+        if not isinstance(pinned_at, str):
+            raise ValueError(
+                f"pin store {path} entry {key!r} has no pinned_at timestamp — refusing")
+        try:
+            datetime.fromisoformat(pinned_at)
+        except ValueError:
+            raise ValueError(
+                f"pin store {path} entry {key!r} has a non-ISO pinned_at — refusing")
+        if key != _pin_key(pin_server, name):
+            raise ValueError(
+                f"pin store {path} entry {key!r} does not match its "
+                "server/name fields — refusing to load it")
+    return store
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _pin_store_lock(store_path):
+    """Cross-platform advisory lock (fcntl.flock on POSIX, msvcrt.locking
+    on Windows) taken on a sibling .lock file for the whole
+    read-modify-write cycle. v2.7.1 (eleventh review round): two
+    concurrent pin operations used to read the same snapshot and the
+    last writer won, silently dropping the other server's pin — atomic
+    rename alone serializes writes, not the cycle that decides WHAT to
+    write."""
+    lock_path = os.fspath(store_path) + ".lock"
+    os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
+    with open(lock_path, "a+b") as lock_file:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _save_pin_store(store_path, store):
+    """Atomic write (temp file + rename) so a crash mid-write cannot leave
+    a half-written store that would force re-pinning."""
+    path = os.fspath(store_path)
+    directory = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".pins-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(store, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _coerce_tool_list(tools):
+    if isinstance(tools, (dict, str)):
+        tools = [tools]
+    coerced = []
+    for tool in tools:
+        if isinstance(tool, str):
+            view = tool.lstrip()
+            try:
+                if view[:1] in "{[" and _json_nesting_depth(view) <= _MAX_JSON_DEPTH:
+                    tool = json.loads(view)
+            except (ValueError, TypeError, RecursionError):
+                pass
+        if not isinstance(tool, dict) or not tool.get("name"):
+            raise ValueError("each tool definition needs a 'name' field to be pinned")
+        coerced.append(tool)
+    return coerced
+
+
+def pin_tool_definitions(tools, store_path, server=""):
+    """Record the current digest of every tool definition in `tools`
+    (dicts, JSON strings, or a list of them) into `store_path`, scoped to
+    `server`. Re-pinning an unchanged definition refreshes nothing but
+    pinned_at; the digest that matters is the FIRST one recorded for a
+    key — a changed definition is reported, not silently re-pinned.
+    Returns a PinReport."""
+    report = PinReport(server=server)
+    # The lock covers load -> modify -> save so concurrent pin operations
+    # serialize instead of last-writer-wins.
+    with _pin_store_lock(store_path):
+        store = _load_pin_store(store_path)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for tool in _coerce_tool_list(tools):
+            name = tool["name"]
+            key = _pin_key(server, name)
+            digest = definition_digest(tool)
+            pin = store["pins"].get(key)
+            if pin is None:
+                store["pins"][key] = {"digest": digest, "name": name,
+                                      "server": server, "pinned_at": now}
+                report.pinned.append(name)
+            elif pin.get("digest") == digest:
+                report.unchanged.append(name)
+            else:
+                # Drift at pin time = the definition differs from the stored
+                # pin. Surface it instead of quietly re-pinning: the caller
+                # must consciously accept the new form (re-pin after review).
+                report.changed.append({
+                    "name": name, "old_digest": pin.get("digest"),
+                    "new_digest": digest, "pinned_at": pin.get("pinned_at"),
+                })
+        _save_pin_store(store_path, store)
+    return report
+
+
+def verify_tool_pins(tools, store_path, server=""):
+    """Compare the presented tool definitions against the pinned digests.
+    Every entry in `changed` is a rug-pull alert: the server presented a
+    different definition than what was approved. Entries in `new` were
+    never pinned and need a conscious approval decision."""
+    store = _load_pin_store(store_path)
+    report = PinReport(server=server)
+    seen = set()
+    for tool in _coerce_tool_list(tools):
+        name = tool["name"]
+        key = _pin_key(server, name)
+        seen.add(key)
+        digest = definition_digest(tool)
+        pin = store["pins"].get(key)
+        if pin is None:
+            report.new.append(name)
+        elif pin.get("digest") == digest:
+            report.unchanged.append(name)
+        else:
+            report.changed.append({
+                "name": name, "old_digest": pin.get("digest"),
+                "new_digest": digest, "pinned_at": pin.get("pinned_at"),
+            })
+    for key, pin in store["pins"].items():
+        if (pin.get("server") or "") == server and key not in seen:
+            report.missing.append(pin.get("name", key))
+    return report
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
+def _print_pin_report(report, action):
+    # v2.7.1 (eleventh review round): tool names are untrusted input —
+    # an ESC/OSC52/C1/ZWSP-bearing name used to reach the terminal raw
+    # through this report. Display text escapes every C-class character
+    # (the same rule as finding paths); the raw name stays in the API.
+    print(f"\n=== tool-definition pinning ({action}) ===")
+    if report.server:
+        print(f"  server: {_safe_path_key(report.server)}")
+    for name in report.pinned:
+        print(f"  [+] pinned: {_safe_path_key(name)}")
+    for name in report.unchanged:
+        print(f"  [=] unchanged: {_safe_path_key(name)}")
+    for item in report.changed:
+        print(f"  [!] CHANGED (rug pull): {_safe_path_key(item['name'])}")
+        # Digests and timestamps are store data, not program constants —
+        # validated on load since v2.7.2, and escaped here as the
+        # display-layer rule for every historical value (twelfth round:
+        # a crafted non-hex digest reached the terminal raw through this
+        # exact output).
+        print(f"      pinned {_safe_path_key(item['pinned_at'])}: "
+              f"{_safe_path_key(item['old_digest'][:16])}...")
+        print(f"      presented now:     {_safe_path_key(item['new_digest'][:16])}...")
+    for name in report.new:
+        print(f"  [?] new, not pinned: {_safe_path_key(name)}")
+    for name in report.missing:
+        print(f"  [-] pinned but not presented: {_safe_path_key(name)}")
+
+
+def _run_pin_mode(argv):
+    """CLI: --pin-defs FILE | --verify-defs FILE, both with --store PATH
+    and optional --server NAME. FILE holds one tool definition (object)
+    or a list of them."""
+    def opt(flag):
+        if flag in argv:
+            idx = argv.index(flag)
+            return argv[idx + 1]
+        return None
+
+    store = opt("--store")
+    if not store:
+        print("pinning mode requires --store <path>")
+        sys.exit(2)
+    server = opt("--server") or ""
+    mode = "pin" if "--pin-defs" in argv else "verify"
+    defs_path = opt("--pin-defs") or opt("--verify-defs")
+    with open(defs_path, encoding="utf-8") as fh:
+        tools = json.load(fh)
+    if mode == "pin":
+        report = pin_tool_definitions(tools, store, server=server)
+        _print_pin_report(report, "pin")
+        # 0 = all pinned/unchanged; 2 = drift detected at pin time
+        sys.exit(2 if report.changed else 0)
+    report = verify_tool_pins(tools, store, server=server)
+    _print_pin_report(report, "verify")
+    # 3 = rug pull; 2 = new unpinned tools needing a decision; 0 = clean
+    sys.exit(3 if report.changed else (2 if report.new else 0))
+
+
+
+
 def _main():
-    if len(sys.argv) > 1:
-        with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as fh:
+    argv = sys.argv[1:]
+    if "--pin-defs" in argv or "--verify-defs" in argv:
+        _run_pin_mode(argv)
+        return
+    if argv:
+        with open(argv[0], "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     else:
         text = sys.stdin.read()

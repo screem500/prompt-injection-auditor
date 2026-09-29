@@ -1,5 +1,186 @@
 # Changelog
 
+## v2.7.3 — 2026-09-29
+
+### Fixed — thirteenth-round review: two small anchors in pin validation
+
+The twelfth round closed the packaging question (48 files, full zip
+matches the patch-over-v2.7.0 tree, zero `.git` entries) and left two
+small edits, both reproduced locally before fixing:
+
+1. **A digest padded with a trailing newline measured 65 characters and
+   passed.** The check used `match()` against a pattern ending in `$` —
+   and `$` also matches before a final `\n`. The false digest then
+   produced a spurious CHANGED alert and a store rewrite. Validation now
+   uses `fullmatch`: exactly 64 lowercase hex characters, nothing more.
+2. **A pin missing its `server` field loaded in the default scope.**
+   `pin.get("server", "")` treats absence and the explicit empty string
+   as the same thing; they are not. The field is now required — the
+   explicit `""` (default-scope pins) stays legal, absence is refused.
+
+Both refusals leave the store's bytes untouched; the six prior
+validation cases and the valid-store round trip stay green.
+
+### Benchmark and external corpus (method unchanged, VALIDATION.md)
+
+Hardened 3.0 / vulnerable 46.3 / separation 43.3 — unchanged. garak
+in-the-wild (650 prompts, SHA-256 c072aa09…): BLOCK 111 / WARN 135 /
+ALLOW 404 — unchanged.
+
+### Tests
+
+4 new cases in `tests/test_fp_regression.py` (round 13: newline-padded
+digest, trailing-garbage digest, and missing-server-field each refused
+without a store rewrite, plus the default-scope round trip packaged per
+the round's non-blocking note). 358 → 362 tests; 221 cases in the
+regression file.
+
+## v2.7.2 — 2026-09-28
+
+### Fixed — twelfth-round review: the corruption-refusal contract completed, packaging restored
+
+The eleventh round's three fixes (lock, CLI name escaping, null-entry
+refusal) were all verified — including a real two-process lock-ordering
+test — and it then completed the store-validation contract and caught a
+packaging regression of ours:
+
+1. **Malformed-entry validation is now total.** A pin holding only a
+   well-formed digest was accepted: the missing-report logic depends on
+   the absent `server` field (a pinned tool silently dropped off the
+   missing list), and a later pin rewrote the file. A 64-character
+   non-hex digest — including one opening with raw OSC bytes — was
+   accepted too, and its stored bytes reached the terminal raw through
+   the changed-report display. Every entry is now validated in full
+   (64-char lowercase-hex digest, `name`/`server` types, ISO-8601
+   `pinned_at`, key consistency with the server/name fields); the whole
+   store is refused on any violation **without modifying a byte of it**,
+   and the changed-report display escapes digests and timestamps like
+   every other historical value.
+2. **Packaging restored.** v2.7.1's full zip accidentally dropped
+   `.github/workflows/tests.yml` and `.gitignore` — the archive
+   exclusion pattern matched `.git*` broadly instead of the `.git/`
+   directory only (46 files instead of 48). The exclusion is now
+   surgical; the full zip and the patch-over-v2.7.0 produce the same
+   project tree (minus git data).
+
+### Benchmark and external corpus (method unchanged, VALIDATION.md)
+
+Hardened 3.0 / vulnerable 46.3 / separation 43.3 — unchanged. garak
+in-the-wild (650 prompts, SHA-256 c072aa09…): BLOCK 111 / WARN 135 /
+ALLOW 404 — unchanged.
+
+### Tests
+
+6 new cases in `tests/test_fp_regression.py` (round 12: digest-only,
+non-hex, control-char, key-inconsistent, and bad-timestamp entries each
+refused without rewriting the store; valid-store round trip preserved).
+352 → 358 tests; 217 cases in the regression file.
+
+## v2.7.1 — 2026-09-28
+
+### Fixed — eleventh-round review: three pin-store/CLI findings, one packaging fix
+
+The tenth round verified the main pinning path (drift, invisible
+characters, pin-survival semantics, 348 tests green, measurements
+stable) and then, true to form, proved three ways the pin layer itself
+could be subverted — each reproduced locally before fixing:
+
+1. **Internally-corrupted stores were silently re-pinned.** A store
+   entry like `"srv/fetch": null` read as "no pin", so the presented
+   (possibly attacker-chosen) definition replaced it and the CLI exited
+   with success — a silent reset of exactly the thing pinning exists to
+   protect. `_load_pin_store` now validates every pin entry (must be an
+   object with a 64-char digest string) and refuses the whole store with
+   a clear error. Never an excuse to re-pin.
+2. **Untrusted tool names reached the terminal raw through the new CLI.**
+   A name carrying ESC/OSC 52, the C1 single-character OSC form, or ZWSP
+   printed unescaped in the pinning report. Display output now routes
+   every name (and the server label) through the categorical C-class
+   escaper — the same rule as finding paths; raw values stay in the API.
+3. **Concurrent pinning lost updates.** Two pin operations (two servers,
+   two processes) both reported success but the last writer's snapshot
+   won and the other pin vanished. Atomic rename alone serializes
+   writes, not the read-modify-write that decides what to write: pinning
+   now takes a cross-platform advisory lock (POSIX flock / Windows
+   msvcrt.locking) on a sibling `.lock` file across the whole cycle; a
+   concurrent test proves both servers' pins survive.
+
+**Packaging**: the v2.7.0 full zip accidentally shipped the clone's
+`.git` directory (23 objects). Distribution archives now exclude `.git`
+— verified in this package.
+
+**Research-precision note (reviewer's)**: the 36.5% MCPTox figure
+measures tool-poisoning attack success against unpinned agents, not the
+efficacy of pinning itself; the CHANGELOG/README now cite it strictly as
+the threat-evidence base for adding pinning, which is what the paper
+supports.
+
+### Benchmark and external corpus (method unchanged, VALIDATION.md)
+
+Hardened 3.0 / vulnerable 46.3 / separation 43.3 — unchanged. garak
+in-the-wild (650 prompts, SHA-256 c072aa09…): BLOCK 111 / WARN 135 /
+ALLOW 404 — unchanged.
+
+### Tests
+
+4 new cases in `tests/test_fp_regression.py` (round 11: null and
+malformed pin entries refused, CLI name escaping for ESC/C1/ZWSP,
+concurrent pins from two processes both surviving). 348 → 352 tests.
+
+## v2.7.0 — 2026-09-28
+
+### Added — tool-definition pinning against rug pulls (OWASP MCP03)
+
+A rug pull is the quietest tool-poisoning variant: the server changes a
+tool's description or schema *after* the user approved it. The tool name
+stays trusted, the content turns hostile, and no single scan can see it
+— yesterday's scan approved a different document than today's. The 2026
+evidence converged on time-based controls (Microsoft's June 2026 MCP
+guidance: signed manifests and metadata scanning; the MCPTox benchmark:
+36.5% average attack success against unpinned tool poisoning), and this
+was the strongest-evidenced open item since the v2.6.2 landscape note.
+
+`mcp_guard.py` gains a pinning layer:
+
+- `pin_tool_definitions(tools, store_path, server="")` — records a
+  SHA-256 digest of every tool definition's canonical form (sorted keys,
+  tight separators; unparseable strings hash as-is) at approval time.
+- `verify_tool_pins(tools, store_path, server="")` — re-hashes the
+  presented definitions on every (re)connection. Every entry in
+  `changed` is a rug-pull alert with both digests and the pin's
+  timestamp; `new` lists tools never pinned (needing a conscious
+  decision); `missing` lists pinned tools the server no longer presents.
+- Drift at pin time is *reported, never silently re-pinned* — the stored
+  pin survives until a human re-pins after review.
+- The store is a caller-owned JSON document, written atomically
+  (temp-file + rename), versioned (`format`), and refuses to load if it
+  is corrupted or foreign — no silent pin resets. Like SSH known_hosts
+  it must live where connected servers cannot write it: pinning protects
+  the channel against network content, not against a compromised
+  operator seat (documented in the module and README).
+- CLI: `python mcp_guard.py --pin-defs tools.json --store pins.json
+  [--server NAME]` and `--verify-defs ...` — exit 0 clean, 2 new
+  unpinned tools (or drift at pin time), 3 rug pull.
+
+Any drift flags — including invisible-character edits, which change the
+digest while the rendered text looks identical (`guard_tool_definition`
+separately scans content for hostility).
+
+### Benchmark and external corpus (method unchanged, VALIDATION.md)
+
+Hardened 3.0 / vulnerable 46.3 / separation 43.3 — unchanged (the
+scanner is untouched). garak in-the-wild (650 prompts, SHA-256
+c072aa09…): BLOCK 111 / WARN 135 / ALLOW 404, noticed 37.8%, mean 26.4 —
+unchanged (the shield is untouched).
+
+### Tests
+
+11 new cases in `tests/test_fp_regression.py` (round 10: pin/verify
+cycle, description and schema drift, invisible-character drift,
+canonical key ordering, new/missing reporting, server scoping, pin-time
+drift not re-pinning, corrupted-store refusal, and the CLI cycle with
+exit codes). 337 → 348 tests, all green on Python 3.8–3.12.
+
 ## v2.6.9 — 2026-09-24
 
 ### Fixed — CI matrix, take two: the digit guard is backported, so the tests are behavior-driven

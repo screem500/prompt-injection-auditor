@@ -44,10 +44,10 @@ against prompts in the wild; see Limits.
 | Vulnerable targets that fired their rule | 11 of 12 | **12 of 12** |
 | Unit tests | 76 pass | 76 pass |
 
-> **Current measurement (v2.6.7, 2026-09-24):** the table above is the
+> **Current measurement (v2.7.3, 2026-09-29):** the table above is the
 > historical v2.2 run kept for the record. Today's numbers are: hardened
 > mean **3.0** (8 files), vulnerable mean **46.3** (13 files), separation
-> **43.3**, **337 tests** — enforced by the CI gate job.
+> **43.3**, **362 tests** — enforced by the CI gate job.
 
 An 8-point gap meant a prompt with a live API key scored about the same as a
 carefully hardened one. That is the finding the benchmark existed to produce.
